@@ -83,3 +83,9 @@ Tài khoản hội viên cũ dùng số điện thoại trong hồ sơ và mật
 Chấp nhận số 9–15 chữ số, bỏ khoảng trắng/dấu chấm/gạch ngang/ngoặc, đổi +84 thành 0.
 Nếu hồ sơ cũ trùng số điện thoại, chặn đăng nhập thay vì đoán tài khoản; cần lễ tân hỗ trợ.
 Email không còn là định danh đăng nhập. Chưa có OTP xác minh số điện thoại.
+
+## Đăng ký lại số điện thoại sau khi xóa
+Chỉ hồ sơ chưa xóa giữ số điện thoại. Sau khi xóa, số đó được đăng ký tài khoản mới.
+Tài khoản mới có ID, mật khẩu và hồ sơ riêng; không xem được hóa đơn/lịch tập cũ.
+Lịch sử đã thu vẫn giữ ở hồ sơ cũ; tài khoản và phiên đăng nhập cũ vẫn bị khóa.
+Nếu số thuộc hồ sơ tại quầy chưa có tài khoản và chưa xóa, cần lễ tân hỗ trợ, không tự chiếm hồ sơ.

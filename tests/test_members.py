@@ -135,4 +135,31 @@ class MemberFlow(unittest.TestCase):
    self.assertIn('chưa thêm email',real_confirmation('', 'Test'))
    smtp.assert_not_called()
 
+ def test_reuse_deleted_phone_keeps_old_history_private(self):
+  self.signup(name='Old Person');self.login();self.post('/account',{'package':1})
+  with db() as c:
+   old=c.execute('SELECT id,user_id FROM members').fetchone()
+   # Reproduce accounts from the previous phone-as-username version.
+   c.execute('UPDATE users SET username=? WHERE id=?',('0901234567',old['user_id']))
+   c.execute("UPDATE invoices SET paid_at='2026-01-01' WHERE member=?",(old['id'],))
+   c.execute("INSERT INTO plans(member,exercise,sets,reps,days) VALUES(?,1,3,15,'2')",(old['id'],))
+  staff=app.test_client();self.login('letan','Gym@12345',staff)
+  self.post(f"/members/{old['id']}/delete",{'confirm':str(old['id'])},staff)
+  newclient=app.test_client()
+  self.c=newclient
+  self.assertEqual(self.signup(email='',name='New Person',phone='+84 901 234 567',password='NewPass123',confirm_password='NewPass123').status_code,302)
+  self.assertEqual(self.login().status_code,200)  # Old password must not access the new account.
+  self.assertEqual(self.login(password='NewPass123').status_code,302)
+  page=self.c.get('/account').get_data(as_text=True)
+  self.assertIn('New Person',page);self.assertNotIn('Old Person',page);self.assertNotIn('Squat',page)
+  self.assertIn('Chưa có hóa đơn.',page)
+  self.signup()  # Logged-in signup cannot create another profile.
+  with db() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM members WHERE deleted_at IS NULL').fetchone()[0],1)
+   self.assertEqual(c.execute('SELECT member FROM invoices').fetchone()[0],old['id'])
+   self.assertEqual(c.execute('SELECT sum(amount) FROM invoices').fetchone()[0],500000)
+  oldclient=app.test_client()
+  with oldclient.session_transaction() as session: session.update(uid=old['user_id'],role='member')
+  self.assertEqual(oldclient.get('/account').status_code,302)
+
 if __name__=='__main__': unittest.main()

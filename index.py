@@ -106,7 +106,7 @@ def login():
             u = c.execute("SELECT * FROM users WHERE username=? AND role!='member'", (identifier.lower(),)).fetchone()
             if not u:
                 phone = normalize_phone(identifier)
-                candidates = c.execute("SELECT u.*,m.phone FROM users u JOIN members m ON m.user_id=u.id WHERE u.role='member'").fetchall() if phone else []
+                candidates = c.execute("SELECT u.*,m.phone FROM users u JOIN members m ON m.user_id=u.id WHERE u.role='member' AND m.deleted_at IS NULL").fetchall() if phone else []
                 matches = [row for row in candidates if normalize_phone(row['phone']) == phone]
                 # Never guess between legacy profiles sharing a phone number.
                 u = matches[0] if len(matches) == 1 else None
@@ -161,12 +161,12 @@ def signup():
                 raise ValueError()
             with db() as c:
                 c.execute('BEGIN IMMEDIATE')
-                # A phone already on a legacy/archived profile cannot claim a new account.
-                if any(normalize_phone(row['phone']) == phone for row in c.execute('SELECT phone FROM members')):
+                # Only current profiles reserve phone numbers; archived history stays separate.
+                if any(normalize_phone(row['phone']) == phone for row in c.execute('SELECT phone FROM members WHERE deleted_at IS NULL')):
                     flash('Số điện thoại đã có hồ sơ hội viên. Vui lòng đăng nhập hoặc liên hệ lễ tân.')
                     return render_template('signup.html')
                 uid = c.execute("INSERT INTO users(username,password,role) VALUES(?,?,'member')",
-                                (phone, generate_password_hash(password))).lastrowid
+                                ('member:' + secrets.token_hex(16), generate_password_hash(password))).lastrowid
                 c.execute('INSERT INTO members(name,gender,birth,phone,email,registered,source,user_id) VALUES(?,?,?,?,?,?,?,?)',
                           (name,gender,birth,phone,email,date.today().isoformat(),'Trực tuyến',uid))
             flash('Tạo tài khoản thành công! Hãy đăng nhập bằng số điện thoại để chọn gói tập.')
