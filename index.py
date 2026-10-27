@@ -272,7 +272,10 @@ def settings():
         packages=c.execute('SELECT * FROM packages').fetchall(); exercises=c.execute('SELECT * FROM exercises WHERE active=1').fetchall(); limit=c.execute('SELECT max_days FROM settings').fetchone()[0]
     return render_template('settings.html',packages=packages,exercises=exercises,limit=limit)
 
+# Flask CLI/PyCharm imports this module without running the __main__ block.
+# Initialize and migrate the database for both supported launch methods.
+init_db()
+
 if __name__=='__main__':
-    init_db()
     app.run(host='127.0.0.1',port=5000,debug=os.getenv('FLASK_DEBUG')=='1')
 
