@@ -39,7 +39,9 @@ def init_db():
         c.execute('CREATE UNIQUE INDEX IF NOT EXISTS members_user_id ON members(user_id)')
         for months, price in [(1,500000),(3,1200000),(6,2000000),(12,3500000)]:
             c.execute('INSERT OR IGNORE INTO packages(months,price) VALUES(?,?)',(months,price))
-        for name,role in [('admin','admin'),('letan','reception'),('hlv','trainer'),('thungan','cashier')]:
+        # Existing cashier accounts retain their password and now use reception permissions.
+        c.execute("UPDATE users SET role='reception' WHERE role='cashier'")
+        for name,role in [('admin','admin'),('letan','reception'),('hlv','trainer')]:
             c.execute('INSERT OR IGNORE INTO users(username,password,role) VALUES(?,?,?)',(name,generate_password_hash(os.getenv('DEMO_PASSWORD','Gym@12345')),role))
         if not c.execute('SELECT 1 FROM exercises').fetchone():
             c.executemany('INSERT INTO exercises(name) VALUES(?)',[(x,) for x in ['Squat','Bench press','Deadlift','Chạy bộ']])
@@ -243,7 +245,7 @@ def change_password():
 
 
 @app.route('/members/<int:mid>/password', methods=['GET', 'POST'])
-@require('admin')
+@require('reception')
 def reset_member_password(mid):
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -252,9 +254,9 @@ def reset_member_password(mid):
         if request.method == 'POST':
             f = request.form
             password = f.get('password', '')
-            admin = c.execute('SELECT password FROM users WHERE id=?', (session['uid'],)).fetchone()
-            if not check_password_hash(admin['password'], f.get('current_password', '')):
-                flash('Mật khẩu quản trị viên không đúng.')
+            operator = c.execute('SELECT password FROM users WHERE id=?', (session['uid'],)).fetchone()
+            if not check_password_hash(operator['password'], f.get('current_password', '')):
+                flash('Mật khẩu của bạn không đúng.')
             elif not 8 <= len(password) <= 128 or password != f.get('confirm_password'):
                 flash('Mật khẩu mới phải có 8–128 ký tự và khớp với phần nhập lại.')
             else:
@@ -279,10 +281,11 @@ def dashboard():
     return render_template('dashboard.html',members=members,active=active,revenue=revenue,year=year,counts=[counts.get(f'{i:02}',0) for i in range(1,13)],totals=[totals.get(f'{i:02}',0) for i in range(1,13)])
 
 @app.route('/members',methods=['GET','POST'])
-@require('reception')
+@require('reception','trainer')
 def members():
     with db() as c:
         if request.method=='POST':
+            if session['role'] not in ['admin','reception']: abort(403)
             trainer=request.form.get('trainer') or None
             if trainer and not c.execute("SELECT 1 FROM users WHERE id=? AND role='trainer'",(trainer,)).fetchone(): abort(400)
             c.execute('UPDATE members SET trainer=? WHERE id=? AND deleted_at IS NULL',(trainer,request.form['member'])); flash('Đã cập nhật huấn luyện viên.')
@@ -308,7 +311,7 @@ def delete_member(mid):
     return render_template('delete_member.html', member=member)
 
 @app.route('/payments',methods=['GET','POST'])
-@require('cashier')
+@require('reception')
 def payments():
     with db() as c:
         if request.method=='POST':
@@ -329,25 +332,43 @@ def payments():
 @require('trainer')
 def plans():
     with db() as c:
-        allowed=c.execute('SELECT * FROM members WHERE deleted_at IS NULL AND (trainer=? OR ?=\'admin\')',(session['uid'],session['role'])).fetchall()
-        limit=c.execute('SELECT max_days FROM settings').fetchone()[0]
-        if request.method=='POST':
+        # Serialize claiming an unassigned member with plan creation.
+        if request.method == 'POST': c.execute('BEGIN IMMEDIATE')
+        available = c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL ORDER BY m.name,m.id').fetchall()
+        limit = c.execute('SELECT max_days FROM settings').fetchone()[0]
+        if request.method == 'POST':
             try:
-                mid=int(request.form['member']); days=sorted(set(request.form.getlist('days'))); sets=int(request.form['sets']); reps=int(request.form['reps']); eid=int(request.form['exercise'])
-                existing=set()
-                for row in c.execute('SELECT days FROM plans WHERE member=?',(mid,)): existing.update(row['days'].split(','))
-                if mid not in [m['id'] for m in allowed] or not days or not set(days)<=set('2345678') or len(existing|set(days))>limit or not 1<=sets<=100 or not 1<=reps<=1000 or not c.execute('SELECT 1 FROM exercises WHERE id=? AND active=1',(eid,)).fetchone(): raise ValueError()
-                c.execute('INSERT INTO plans(member,exercise,sets,reps,days) VALUES(?,?,?,?,?)',(mid,eid,sets,reps,','.join(days))); flash('Đã thêm bài tập.')
-            except (ValueError,KeyError): flash(f'Không hợp lệ: tổng số ngày tập của hội viên phải tối đa {limit} ngày/tuần.')
-        rows=c.execute("SELECT p.*,m.name,e.name exercise_name FROM plans p JOIN members m ON m.id=p.member JOIN exercises e ON e.id=p.exercise WHERE m.deleted_at IS NULL AND (m.trainer=? OR ?='admin')",(session['uid'],session['role'])).fetchall()
-        exercises=c.execute('SELECT * FROM exercises WHERE active=1').fetchall()
-    return render_template('plans.html',rows=rows,members=allowed,exercises=exercises,limit=limit)
+                mid = int(request.form['member'])
+                days = sorted(set(request.form.getlist('days')))
+                sets = int(request.form['sets']); reps = int(request.form['reps']); eid = int(request.form['exercise'])
+                member = next((m for m in available if m['id'] == mid), None)
+                if not member: raise ValueError()
+                if session['role'] != 'admin' and member['trainer'] not in (None, session['uid']):
+                    abort(403)
+                existing = set()
+                for row in c.execute('SELECT days FROM plans WHERE member=?', (mid,)):
+                    existing.update(row['days'].split(','))
+                if (not days or not set(days)<=set('2345678') or len(existing|set(days))>limit
+                    or not 1<=sets<=100 or not 1<=reps<=1000
+                    or not c.execute('SELECT 1 FROM exercises WHERE id=? AND active=1',(eid,)).fetchone()):
+                    raise ValueError()
+                if member['trainer'] is None and session['role'] == 'trainer':
+                    c.execute('UPDATE members SET trainer=? WHERE id=? AND trainer IS NULL', (session['uid'],mid))
+                c.execute('INSERT INTO plans(member,exercise,sets,reps,days) VALUES(?,?,?,?,?)',(mid,eid,sets,reps,','.join(days)))
+                flash('Đã thêm bài tập và phân công hội viên cho bạn nếu chưa có HLV.')
+                return redirect(url_for('plans', member=mid))
+            except (ValueError,KeyError):
+                flash(f'Thông tin không hợp lệ. Chọn hội viên, bài tập và từ 1 đến {limit} ngày tập/tuần.')
+        rows = c.execute("SELECT p.*,m.name,e.name exercise_name FROM plans p JOIN members m ON m.id=p.member JOIN exercises e ON e.id=p.exercise WHERE m.deleted_at IS NULL AND (m.trainer=? OR ?='admin')",(session['uid'],session['role'])).fetchall()
+        exercises = c.execute('SELECT * FROM exercises WHERE active=1').fetchall()
+        can_schedule = any(session['role']=='admin' or m['trainer'] in (None,session['uid']) for m in available)
+    return render_template('plans.html',rows=rows,members=available,exercises=exercises,limit=limit,can_schedule=can_schedule,selected_member=request.args.get('member', type=int))
 
 @app.post('/plans/<int:pid>/delete')
 @require('trainer')
 def delete_plan(pid):
     with db() as c:
-        c.execute("DELETE FROM plans WHERE id=? AND member IN (SELECT id FROM members WHERE trainer=? OR ?='admin')",(pid,session['uid'],session['role']))
+        c.execute("DELETE FROM plans WHERE id=? AND member IN (SELECT id FROM members WHERE deleted_at IS NULL AND (trainer=? OR ?='admin'))",(pid,session['uid'],session['role']))
     return redirect('/plans')
 
 @app.route('/settings',methods=['GET','POST'])

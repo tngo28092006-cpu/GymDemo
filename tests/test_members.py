@@ -35,7 +35,7 @@ class MemberFlow(unittest.TestCase):
   self.post('/account',{'package':1})
   with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0],1)
   self.assertEqual(self.send.call_count,1)
-  staff=app.test_client();self.login('thungan','Gym@12345',staff)
+  staff=app.test_client();self.login('letan','Gym@12345',staff)
   self.post('/payments',{'invoice':1},staff)
   self.assertIn('Đang hoạt động',self.c.get('/account').get_data(as_text=True))
   self.post('/account',{'package':2})
@@ -96,7 +96,7 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(c.execute('SELECT sum(amount) FROM invoices WHERE paid_at IS NOT NULL').fetchone()[0],500000)
    self.assertIsNotNone(c.execute('SELECT deleted_at FROM members WHERE id=?',(mid,)).fetchone()[0])
   self.assertEqual(self.post(url,{'confirm':str(mid)},staff).status_code,404)
-  for user in ['hlv','thungan']:
+  for user in ['hlv']:
    other=app.test_client();self.login(user,'Gym@12345',other)
    self.assertEqual(self.post(url,{'confirm':str(mid)},other).status_code,403)
 
@@ -186,7 +186,7 @@ class MemberFlow(unittest.TestCase):
   with db() as c: mid=c.execute('SELECT id FROM members').fetchone()[0]
   url=f'/members/{mid}/password'
   self.assertEqual(self.post(url,{}).status_code,403)
-  for user in ['letan','hlv','thungan']:
+  for user in ['hlv']:
    staff=app.test_client();self.login(user,'Gym@12345',staff)
    self.assertEqual(staff.get(url).status_code,403)
    self.assertEqual(self.post(url,{},staff).status_code,403)
@@ -211,5 +211,63 @@ class MemberFlow(unittest.TestCase):
   with db() as c:
    legacy=c.execute("INSERT INTO members(name,phone) VALUES('No account','0900000000')").lastrowid
   self.assertEqual(admin.get(f'/members/{legacy}/password').status_code,404)
+
+ def test_reception_collects_payment_and_resets_password(self):
+  self.signup();self.login();self.post('/account',{'package':1})
+  member_client=self.c
+  with db() as c: mid=c.execute('SELECT id FROM members').fetchone()[0]
+  reception=app.test_client();self.login('letan','Gym@12345',reception)
+  self.assertIn('Thanh toán',reception.get('/').get_data(as_text=True))
+  self.assertEqual(reception.get('/payments').status_code,200)
+  self.assertEqual(self.post('/payments',{'invoice':1},reception).status_code,200)
+  self.assertIn('Đặt lại mật khẩu',reception.get('/members').get_data(as_text=True))
+  data=dict(current_password='wrong',password='Reception123',confirm_password='Reception123')
+  self.assertEqual(self.post(f'/members/{mid}/password',data,reception).status_code,200)
+  data['current_password']='Gym@12345'
+  self.assertEqual(self.post(f'/members/{mid}/password',data,reception).status_code,302)
+  self.assertEqual(member_client.get('/account').status_code,302)
+  self.assertEqual(self.login(password='Reception123').status_code,302)
+  with db() as c: self.assertIsNotNone(c.execute('SELECT paid_at FROM invoices').fetchone()[0])
+  self.assertEqual(reception.get('/settings').status_code,403)
+
+ def test_trainer_sees_unassigned_and_claims_on_valid_schedule(self):
+  self.signup();self.signup(email='b@example.com',phone='0901234568',name='Other trainer member')
+  with db() as c:
+   mid=c.execute("SELECT id FROM members WHERE phone='0901234567'").fetchone()[0]
+   peer=c.execute("INSERT INTO users(username,password,role) SELECT 'hlv2',password,role FROM users WHERE username='hlv'").lastrowid
+   c.execute("UPDATE members SET trainer=? WHERE phone='0901234568'",(peer,))
+  self.login('hlv','Gym@12345')
+  page=self.c.get('/members').get_data(as_text=True)
+  self.assertIn('Hoi Vien A',page);self.assertIn('Lập lịch',page);self.assertNotIn('Đặt lại mật khẩu',page);self.assertNotIn('Xóa hội viên',page)
+  self.assertEqual(self.post('/members',dict(member=mid,trainer=peer)).status_code,403)
+  self.assertEqual(self.c.get(f'/plans?member={mid}').status_code,200)
+  data=dict(member=mid,exercise=1,sets=3,reps=15,days=[])
+  self.post('/plans',data)
+  with db() as c: self.assertIsNone(c.execute('SELECT trainer FROM members WHERE id=?',(mid,)).fetchone()[0])
+  data['days']=['2','4','6'];self.assertEqual(self.post('/plans',data).status_code,302)
+  with db() as c:
+   trainer=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+   self.assertEqual(c.execute('SELECT trainer FROM members WHERE id=?',(mid,)).fetchone()[0],trainer)
+   pid=c.execute('SELECT id FROM plans WHERE member=?',(mid,)).fetchone()[0]
+  self.post('/logout',{});self.login('hlv2','Gym@12345')
+  self.assertEqual(self.post('/plans',data).status_code,403)
+  self.post(f'/plans/{pid}/delete',{})
+  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM plans WHERE id=?',(pid,)).fetchone()[0],1)
+  self.assertEqual(self.c.get('/payments').status_code,403)
+  self.assertEqual(self.c.get(f'/members/{mid}/password').status_code,403)
+  self.assertEqual(self.post(f'/members/{mid}/delete',{'confirm':str(mid)}).status_code,403)
+
+ def test_cashier_role_migrates_without_password_change(self):
+  with db() as c:
+   self.assertIsNone(c.execute("SELECT 1 FROM users WHERE username='thungan'").fetchone())
+   c.execute("INSERT INTO users(username,password,role) SELECT 'thungan',password,'cashier' FROM users WHERE username='letan'")
+   old=c.execute("SELECT password FROM users WHERE username='thungan'").fetchone()[0]
+  init_db();init_db()
+  with db() as c:
+   row=c.execute("SELECT role,password FROM users WHERE username='thungan'").fetchone()
+   self.assertEqual(row['role'],'reception');self.assertEqual(row['password'],old)
+  self.assertEqual(self.login('thungan','Gym@12345').status_code,302)
+  self.assertEqual(self.c.get('/payments').status_code,200)
+  self.assertEqual(self.c.get('/members').status_code,200)
 
 if __name__=='__main__': unittest.main()

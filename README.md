@@ -12,16 +12,15 @@ SQLite gym.db tự tạo khi chạy index.py lần đầu. Khởi động lại 
 ## Tài khoản mẫu
 Mật khẩu chung ban đầu: Gym@12345
 - admin: toàn quyền
-- letan: đăng ký tại quầy, xem hội viên, gán HLV
-- hlv: tạo/xóa lịch cho hội viên được phân công
-- thungan: xem hóa đơn và xác nhận đã thu tiền
+- letan: quản lý hội viên, gán HLV, thu tiền và đặt lại mật khẩu hội viên
+- hlv: xem danh sách hội viên, nhận hội viên chưa có HLV và lập/xóa lịch được phân công
 Đăng ký tài khoản trực tuyến: http://127.0.0.1:5000/signup.
 Có thể đặt biến môi trường DEMO_PASSWORD trước lần chạy đầu để đổi mật khẩu khởi tạo.
 
 ## Kịch bản chạy thử
 1. Tạo tài khoản tại /signup, đăng nhập rồi chọn gói tại /account.
 2. Đăng nhập admin hoặc letan, vào Hội viên, gán HLV hlv.
-3. Đăng nhập admin hoặc thungan, vào Thanh toán, xác nhận đã thu tiền.
+3. Đăng nhập admin hoặc letan, vào Thanh toán, xác nhận đã thu tiền.
 4. Đăng nhập hlv, tạo Squat, 3 hiệp, 15 lần, Thứ 2/4/6.
 5. Xem Tổng quan: hội viên còn hạn, đăng ký và doanh thu theo tháng trong năm hiện tại.
 6. Admin vào Quy định để đổi giá, thêm/sửa/xóa bài tập và giới hạn ngày tập.
@@ -61,7 +60,7 @@ Không đưa gym.db chứa thông tin hội viên lên GitHub.
 1. Mở /signup: nhập hồ sơ, số điện thoại, mật khẩu và xác nhận mật khẩu.
 2. Tạo tài khoản chỉ tạo hồ sơ, chưa tạo hóa đơn hay kích hoạt gói tập.
 3. Đăng nhập bằng số điện thoại ở /login, chọn gói trên /account.
-4. Thu ngân xác nhận thanh toán; hội viên xem hạn gói, HLV, lịch tập và hóa đơn riêng.
+4. Lễ tân xác nhận thanh toán; hội viên xem hạn gói, HLV, lịch tập và hóa đơn riêng.
 5. Chỉ được có một hóa đơn chờ thanh toán; có thể mua tiếp/gia hạn sau khi hóa đơn được thu.
 
 /register chỉ dành cho lễ tân/admin đăng ký tại quầy; người chưa đăng nhập phải tạo tài khoản trước.
@@ -92,10 +91,20 @@ Nếu số thuộc hồ sơ tại quầy chưa có tài khoản và chưa xóa, 
 
 ## Đổi và đặt lại mật khẩu
 - Hội viên: Trang cá nhân > Đổi mật khẩu. Nhập mật khẩu hiện tại, mật khẩu mới và nhập lại.
-- Quản trị viên: Hội viên > Đặt lại mật khẩu (chỉ hồ sơ đang hoạt động có tài khoản).
-  Nhập mật khẩu quản trị viên để xác nhận, sau đó mật khẩu mới cho hội viên và nhập lại.
+- Quản trị viên hoặc lễ tân: Hội viên > Đặt lại mật khẩu (chỉ hồ sơ đang hoạt động có tài khoản).
+  Nhập mật khẩu tài khoản đang thao tác để xác nhận, sau đó mật khẩu mới cho hội viên và nhập lại.
 - Mật khẩu mới có 8–128 ký tự, chỉ lưu dạng băm; không hiển thị hoặc gửi mật khẩu qua email.
 - Đổi/đặt lại mật khẩu tăng phiên bản xác thực; mọi phiên cũ bị chặn ở lần truy cập tiếp theo.
   Hội viên tự đổi sẽ được đưa về đăng nhập ngay; quản trị viên giữ phiên hiện tại.
 - Hồ sơ tại quầy chưa có tài khoản hoặc hồ sơ đã xóa không được đặt lại mật khẩu.
 - Database tự thêm auth_version khi khởi động, giữ các tài khoản và dữ liệu cũ.
+
+## Gộp thu ngân vào lễ tân và xếp lịch cho HLV
+Chỉ còn vai trò admin, reception (lễ tân kiêm thu ngân), trainer và member.
+Không tạo tài khoản thungan cho database mới; tài khoản cashier cũ được chuyển sang reception, giữ mật khẩu.
+Lễ tân có Thanh toán, Xóa hội viên và Đặt lại mật khẩu (xác nhận bằng mật khẩu của chính lễ tân).
+HLV có trang Hội viên chỉ đọc. Chọn Lập lịch để vào lịch của hội viên được chọn.
+HLV thấy hội viên chưa phân công và của mình; danh sách chọn cũng ghi rõ người đang thuộc HLV khác.
+Khi HLV tạo lịch đầu tiên cho người chưa phân công, hệ thống tự gán người đó cho HLV đang đăng nhập.
+HLV không được thay phân công, xóa hội viên, thu tiền hay đặt lại mật khẩu.
+Hội viên thuộc HLV khác cần lễ tân/admin đổi phân công trước; admin có thể lập lịch cho mọi hội viên.
