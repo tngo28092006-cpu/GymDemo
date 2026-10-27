@@ -58,15 +58,15 @@ Không đưa gym.db chứa thông tin hội viên lên GitHub.
 
 
 ## Tài khoản hội viên (luồng mới)
-1. Mở /signup: nhập hồ sơ, email, mật khẩu và xác nhận mật khẩu.
+1. Mở /signup: nhập hồ sơ, số điện thoại, mật khẩu và xác nhận mật khẩu.
 2. Tạo tài khoản chỉ tạo hồ sơ, chưa tạo hóa đơn hay kích hoạt gói tập.
-3. Đăng nhập bằng email ở /login, chọn gói trên /account.
+3. Đăng nhập bằng số điện thoại ở /login, chọn gói trên /account.
 4. Thu ngân xác nhận thanh toán; hội viên xem hạn gói, HLV, lịch tập và hóa đơn riêng.
 5. Chỉ được có một hóa đơn chờ thanh toán; có thể mua tiếp/gia hạn sau khi hóa đơn được thu.
 
 /register chỉ dành cho lễ tân/admin đăng ký tại quầy; người chưa đăng nhập phải tạo tài khoản trước.
 Dữ liệu cũ được giữ khi chạy lại index.py: tự thêm cột liên kết tài khoản và chỉ mục duy nhất.
-Hồ sơ cũ không tự gắn tài khoản theo email (email chưa được xác minh). Nếu email đã có hồ sơ,
+Hồ sơ cũ không tự gắn tài khoản mới theo số điện thoại. Nếu số điện thoại đã có hồ sơ,
 đăng ký tài khoản bị chặn và yêu cầu liên hệ lễ tân. Luồng kích hoạt tài khoản cho hồ sơ cũ chưa có giao diện.
 Không xóa gym.db khi cập nhật. Sao lưu gym.db trước khi nâng cấp.
 Thống kê đăng ký hội viên tính theo ngày tạo hồ sơ tài khoản; doanh thu chỉ tính sau khi thu tiền.
@@ -74,3 +74,12 @@ Email SMTP được gửi khi chọn gói thành công, không gửi khi mới t
 Chưa có xác minh email, quên mật khẩu hoặc giới hạn thử đăng nhập; chỉ dùng localhost demo.
 
 Chạy kiểm tra: `python -m unittest discover -s tests -v`.
+
+## Đăng nhập bằng số điện thoại
+Hội viên dùng số điện thoại + mật khẩu, nhân viên vẫn dùng tài khoản cũ.
+Email tùy chọn khi đăng ký và có thể thêm/sửa/bỏ sau đó ở Trang cá nhân > Lưu email.
+Không có email thì bỏ qua gửi SMTP; đăng ký gói và thanh toán vẫn hoạt động.
+Tài khoản hội viên cũ dùng số điện thoại trong hồ sơ và mật khẩu cũ; không đổi ID, hóa đơn hay lịch tập.
+Chấp nhận số 9–15 chữ số, bỏ khoảng trắng/dấu chấm/gạch ngang/ngoặc, đổi +84 thành 0.
+Nếu hồ sơ cũ trùng số điện thoại, chặn đăng nhập thay vì đoán tài khoản; cần lễ tân hỗ trợ.
+Email không còn là định danh đăng nhập. Chưa có OTP xác minh số điện thoại.

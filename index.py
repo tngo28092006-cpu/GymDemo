@@ -72,7 +72,20 @@ def add_months(d,n):
     m=d.month-1+n; y=d.year+m//12; m=m%12+1
     return date(y,m,min(d.day,calendar.monthrange(y,m)[1]))
 
+def normalize_phone(value):
+    phone = re.sub(r'[\s().-]', '', value or '')
+    if phone.startswith('+84'):
+        phone = '0' + phone[3:]
+    return phone if re.fullmatch(r'[0-9]{9,15}', phone) else ''
+
+
+def valid_email(email):
+    return not email or (len(email) <= 254 and re.fullmatch(
+        r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", email) is not None)
+
+
 def confirmation(email,name):
+    if not email: return 'Bạn chưa thêm email; có thể bổ sung tại trang cá nhân để nhận xác nhận.'
     host=os.getenv('SMTP_HOST')
     if not host: return 'Chưa gửi email: chưa cấu hình SMTP.'
     try:
@@ -88,7 +101,15 @@ def confirmation(email,name):
 @app.route('/login',methods=['GET','POST'])
 def login():
     if request.method=='POST':
-        with db() as c: u=c.execute('SELECT * FROM users WHERE username=?',(request.form['username'].strip().lower(),)).fetchone()
+        identifier = request.form.get('username', '').strip()
+        with db() as c:
+            u = c.execute("SELECT * FROM users WHERE username=? AND role!='member'", (identifier.lower(),)).fetchone()
+            if not u:
+                phone = normalize_phone(identifier)
+                candidates = c.execute("SELECT u.*,m.phone FROM users u JOIN members m ON m.user_id=u.id WHERE u.role='member'").fetchall() if phone else []
+                matches = [row for row in candidates if normalize_phone(row['phone']) == phone]
+                # Never guess between legacy profiles sharing a phone number.
+                u = matches[0] if len(matches) == 1 else None
         with db() as c:
             archived = c.execute('SELECT 1 FROM members WHERE user_id=? AND deleted_at IS NOT NULL', (u['id'],)).fetchone() if u else None
         if u and not archived and check_password_hash(u['password'],request.form['password']):
@@ -110,8 +131,8 @@ def register():
         packages=c.execute('SELECT * FROM packages ORDER BY months').fetchall()
         if request.method=='POST':
             try:
-                f=request.form; name=f['name'].strip(); email=f['email'].strip(); phone=f['phone'].strip(); birth=int(f['birth'])
-                if not name or len(name)>120 or '@' not in email or '\n' in email or '\r' in email or not phone.isdigit() or not 9<=len(phone)<=15 or not 1900<=birth<=date.today().year or f['gender'] not in ['Nam','Nữ','Khác']: raise ValueError()
+                f=request.form; name=f['name'].strip(); email=f['email'].strip(); phone=normalize_phone(f['phone']); birth=int(f['birth'])
+                if not name or len(name)>120 or not valid_email(email) or not phone or not 1900<=birth<=date.today().year or f['gender'] not in ['Nam','Nữ','Khác']: raise ValueError()
                 p=c.execute('SELECT * FROM packages WHERE id=?',(f['package'],)).fetchone()
                 if not p: raise ValueError()
                 d=date.today().isoformat(); source='Tại quầy' if session.get('role') in ['admin','reception'] else 'Trực tuyến'
@@ -130,29 +151,28 @@ def signup():
             name = f.get('name', '').strip()
             email = f.get('email', '').strip().lower()
             password = f.get('password', '')
-            phone = f.get('phone', '').strip()
+            phone = normalize_phone(f.get('phone', ''))
             birth = int(f.get('birth', ''))
             gender = f.get('gender', '')
-            if (not name or len(name)>120 or len(email)>254
-                or not re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", email)
+            if (not name or len(name)>120 or not valid_email(email)
                 or not 8 <= len(password) <= 128 or password != f.get('confirm_password')
-                or not phone.isascii() or not phone.isdigit() or not 9<=len(phone)<=15
+                or not phone
                 or not 1900<=birth<=date.today().year or gender not in ['Nam','Nữ','Khác']):
                 raise ValueError()
             with db() as c:
                 c.execute('BEGIN IMMEDIATE')
-                # Never attach an existing membership using an unverified email.
-                if c.execute('SELECT 1 FROM members WHERE lower(trim(email))=?', (email,)).fetchone():
-                    flash('Email đã có hồ sơ hội viên. Vui lòng liên hệ lễ tân để được hỗ trợ tài khoản.')
+                # A phone already on a legacy/archived profile cannot claim a new account.
+                if any(normalize_phone(row['phone']) == phone for row in c.execute('SELECT phone FROM members')):
+                    flash('Số điện thoại đã có hồ sơ hội viên. Vui lòng đăng nhập hoặc liên hệ lễ tân.')
                     return render_template('signup.html')
                 uid = c.execute("INSERT INTO users(username,password,role) VALUES(?,?,'member')",
-                                (email, generate_password_hash(password))).lastrowid
+                                (phone, generate_password_hash(password))).lastrowid
                 c.execute('INSERT INTO members(name,gender,birth,phone,email,registered,source,user_id) VALUES(?,?,?,?,?,?,?,?)',
                           (name,gender,birth,phone,email,date.today().isoformat(),'Trực tuyến',uid))
-            flash('Tạo tài khoản thành công! Hãy đăng nhập bằng email để chọn gói tập.')
+            flash('Tạo tài khoản thành công! Hãy đăng nhập bằng số điện thoại để chọn gói tập.')
             return redirect('/login')
         except (ValueError, sqlite3.IntegrityError):
-            flash('Không thể tạo tài khoản. Kiểm tra thông tin, email đã dùng và mật khẩu khớp nhau (8–128 ký tự).')
+            flash('Không thể tạo tài khoản. Kiểm tra thông tin, số điện thoại đã dùng và mật khẩu khớp nhau (8–128 ký tự).')
     return render_template('signup.html')
 
 
@@ -166,6 +186,14 @@ def account():
         member = c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.user_id=? AND m.deleted_at IS NULL', (session['uid'],)).fetchone()
         if not member: abort(403)
         if request.method == 'POST':
+            if request.form.get('action') == 'email':
+                email = request.form.get('email', '').strip().lower()
+                if not valid_email(email):
+                    flash('Email không hợp lệ. Để trống nếu không muốn thêm email.')
+                else:
+                    c.execute('UPDATE members SET email=? WHERE id=?', (email, member['id']))
+                    flash('Đã cập nhật email.' if email else 'Đã bỏ email khỏi hồ sơ.')
+                return redirect('/account')
             package = c.execute('SELECT * FROM packages WHERE id=?', (request.form.get('package',''),)).fetchone()
             pending = c.execute('SELECT 1 FROM invoices WHERE member=? AND paid_at IS NULL', (member['id'],)).fetchone()
             if not package:

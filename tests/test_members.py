@@ -2,7 +2,7 @@ import tempfile, unittest, sqlite3
 from pathlib import Path
 from unittest.mock import patch
 from werkzeug.security import check_password_hash
-from index import app, init_db, db
+from index import app, init_db, db, confirmation as real_confirmation
 
 class MemberFlow(unittest.TestCase):
  def setUp(self):
@@ -18,7 +18,7 @@ class MemberFlow(unittest.TestCase):
  def signup(self,email='a@example.com',**kw):
   data=dict(name='Hoi Vien A',email=email,phone='0901234567',gender='Nam',birth=2000,password='Member12345',confirm_password='Member12345');data.update(kw)
   return self.post('/signup',data)
- def login(self,user='a@example.com',password='Member12345',client=None):
+ def login(self,user='0901234567',password='Member12345',client=None):
   return self.post('/login',dict(username=user,password=password),client)
  def test_account_first_and_payment(self):
   self.assertEqual(self.c.get('/register').status_code,302)
@@ -52,7 +52,7 @@ class MemberFlow(unittest.TestCase):
   self.login();self.post('/account',{'package':'999'})
   with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0],0)
  def test_member_isolation(self):
-  self.signup();self.signup(email='b@example.com',name='Secret B')
+  self.signup();self.signup(email='b@example.com',name='Secret B',phone='0901234568')
   with db() as c:
    b=c.execute("SELECT id FROM members WHERE email='b@example.com'").fetchone()[0]
    c.execute('INSERT INTO invoices(member,months,amount,created) VALUES(?,12,3456789,?)',(b,'2026-01-01'))
@@ -99,5 +99,40 @@ class MemberFlow(unittest.TestCase):
   for user in ['hlv','thungan']:
    other=app.test_client();self.login(user,'Gym@12345',other)
    self.assertEqual(self.post(url,{'confirm':str(mid)},other).status_code,403)
+
+ def test_optional_email_and_phone_login(self):
+  self.assertEqual(self.signup(email='').status_code,302)
+  self.assertEqual(self.login(user='a@example.com').status_code,200)
+  self.assertEqual(self.login(user='+84 901-234-567').status_code,302)
+  self.assertIn('Chưa thêm email',self.c.get('/account').get_data(as_text=True))
+  self.post('/account',{'action':'email','email':'new@gmail.com','member':999})
+  with db() as c:
+   self.assertEqual(c.execute('SELECT email FROM members').fetchone()[0],'new@gmail.com')
+   self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0],0)
+  self.post('/account',{'action':'email','email':'invalid'})
+  with db() as c: self.assertEqual(c.execute('SELECT email FROM members').fetchone()[0],'new@gmail.com')
+  self.post('/account',{'action':'email','email':''})
+  with db() as c: self.assertEqual(c.execute('SELECT email FROM members').fetchone()[0],'')
+  self.post('/logout',{})
+  self.signup(email='other@gmail.com',phone='+84 901 234 567')
+  with db() as c: self.assertEqual(c.execute("SELECT count(*) FROM users WHERE role='member'").fetchone()[0],1)
+  self.signup(email='',phone='0901234568')
+  with db() as c: self.assertEqual(c.execute("SELECT count(*) FROM users WHERE role='member'").fetchone()[0],2)
+
+ def test_legacy_email_account_logs_in_by_phone(self):
+  self.signup()
+  with db() as c: c.execute("UPDATE users SET username='a@example.com' WHERE role='member'")
+  self.assertEqual(self.login().status_code,302)
+  self.post('/logout',{})
+  self.assertEqual(self.login('a@example.com').status_code,200)
+  with db() as c:
+   uid=c.execute("INSERT INTO users(username,password,role) SELECT 'duplicate',password,'member' FROM users WHERE role='member'").lastrowid
+   c.execute("INSERT INTO members(name,phone,user_id) VALUES('Duplicate','0901234567',?)",(uid,))
+  self.assertEqual(self.login().status_code,200)
+
+ def test_no_smtp_without_email(self):
+  with patch('index.smtplib.SMTP') as smtp:
+   self.assertIn('chưa thêm email',real_confirmation('', 'Test'))
+   smtp.assert_not_called()
 
 if __name__=='__main__': unittest.main()
