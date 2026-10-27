@@ -29,6 +29,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), max_days INTEGER);
         INSERT OR IGNORE INTO settings VALUES(1,6);
         ''')
+        if 'active' not in {r['name'] for r in c.execute('PRAGMA table_info(users)')}:
+            c.execute('ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1')
         if 'full_name' not in {r['name'] for r in c.execute('PRAGMA table_info(users)')}:
             c.execute("ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''")
         if 'active' not in {r['name'] for r in c.execute('PRAGMA table_info(plans)')}:
@@ -54,7 +56,7 @@ def init_db():
         c.execute('BEGIN IMMEDIATE')
         if not c.execute("SELECT 1 FROM app_migrations WHERE name='trainer-consent-v1'").fetchone():
             # Existing assignments must be confirmed by the selected trainer as well.
-            c.execute("INSERT INTO trainer_requests(member,trainer,status,created) SELECT m.id,m.trainer,'pending',? FROM members m JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL AND u.role='trainer'", (datetime.now().isoformat(),))
+            c.execute("INSERT INTO trainer_requests(member,trainer,status,created) SELECT m.id,m.trainer,'pending',? FROM members m JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL AND u.role='trainer' AND u.active=1", (datetime.now().isoformat(),))
             c.execute('UPDATE members SET trainer=NULL WHERE deleted_at IS NULL')
             c.execute("INSERT INTO app_migrations VALUES('trainer-consent-v1')")
         for months, price in [(1,500000),(3,1200000),(6,2000000),(12,3500000)]:
@@ -72,9 +74,9 @@ def require(*roles):
         def wrapped(*a,**kw):
             if not session.get('uid'): return redirect(url_for('login'))
             with db() as c:
-                user = c.execute('SELECT role,auth_version FROM users WHERE id=?', (session['uid'],)).fetchone()
+                user = c.execute('SELECT role,auth_version,active FROM users WHERE id=?', (session['uid'],)).fetchone()
                 archived = c.execute('SELECT 1 FROM members WHERE user_id=? AND deleted_at IS NOT NULL', (session['uid'],)).fetchone()
-            if not user or archived or session.get('auth_version', 0) != user['auth_version']:
+            if not user or not user['active'] or archived or session.get('auth_version', 0) != user['auth_version']:
                 session.clear()
                 return redirect(url_for('login'))
             session['role'] = user['role']
@@ -110,7 +112,7 @@ def valid_email(email):
 
 def request_trainer(c, member_id, trainer_id):
     member = c.execute('SELECT * FROM members WHERE id=? AND deleted_at IS NULL', (member_id,)).fetchone()
-    trainer = c.execute("SELECT id FROM users WHERE id=? AND role='trainer'", (trainer_id,)).fetchone()
+    trainer = c.execute("SELECT id FROM users WHERE id=? AND role='trainer' AND active=1", (trainer_id,)).fetchone()
     if not member or not trainer: return 'Hội viên hoặc HLV không hợp lệ.'
     if member['trainer'] is not None: return 'Bạn đã có HLV được xác nhận.'
     if c.execute("SELECT 1 FROM trainer_requests WHERE member=? AND status='pending'", (member_id,)).fetchone():
@@ -147,7 +149,7 @@ def login():
                 u = matches[0] if len(matches) == 1 else None
         with db() as c:
             archived = c.execute('SELECT 1 FROM members WHERE user_id=? AND deleted_at IS NOT NULL', (u['id'],)).fetchone() if u else None
-        if u and not archived and check_password_hash(u['password'],request.form['password']):
+        if u and u['active'] and not archived and check_password_hash(u['password'],request.form['password']):
             session.clear()
             session.update(uid=u['id'],role=u['role'],username=u['username'],auth_version=u['auth_version'],csrf=secrets.token_hex(24))
             return redirect('/account' if u['role']=='member' else '/')
@@ -253,7 +255,7 @@ def account():
         active = c.execute('SELECT * FROM invoices WHERE member=? AND paid_at IS NOT NULL AND starts<=? AND expires>? ORDER BY expires DESC LIMIT 1',
                            (member['id'],date.today().isoformat(),date.today().isoformat())).fetchone()
         packages = c.execute('SELECT * FROM packages ORDER BY months').fetchall()
-        trainers = c.execute("SELECT id,username,full_name FROM users WHERE role='trainer' ORDER BY username").fetchall()
+        trainers = c.execute("SELECT id,username,full_name FROM users WHERE role='trainer' AND active=1 ORDER BY username").fetchall()
         trainer_requests = c.execute('SELECT r.*,(CASE WHEN length(u.full_name)>0 THEN u.full_name ELSE u.username END) trainer_name FROM trainer_requests r JOIN users u ON u.id=r.trainer WHERE r.member=? ORDER BY r.id DESC',(member['id'],)).fetchall()
         pending_request = next((r for r in trainer_requests if r['status']=='pending'),None)
     return render_template('account.html',member=member,invoices=invoices,plans=plans,active=active,packages=packages,
@@ -369,8 +371,32 @@ def manage_trainers():
             except sqlite3.IntegrityError:
                 flash('Tên đăng nhập đã tồn tại. Hãy chọn tên khác.')
     with db() as c:
-        trainers = c.execute("SELECT id,username,full_name FROM users WHERE role='trainer' ORDER BY id DESC").fetchall()
+        trainers = c.execute("SELECT id,username,full_name FROM users WHERE role='trainer' AND active=1 ORDER BY id DESC").fetchall()
     return render_template('trainers.html',trainers=trainers)
+
+
+@app.route('/trainers/<int:tid>/delete', methods=['GET','POST'])
+@require('reception')
+def delete_trainer(tid):
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        trainer = c.execute("SELECT id,username,full_name FROM users WHERE id=? AND role='trainer' AND active=1",(tid,)).fetchone()
+        if not trainer: abort(404)
+        affected = c.execute('SELECT count(*) FROM members WHERE trainer=? AND deleted_at IS NULL',(tid,)).fetchone()[0]
+        pending_count = c.execute("SELECT count(*) FROM trainer_requests WHERE trainer=? AND status='pending'",(tid,)).fetchone()[0]
+        if request.method == 'POST':
+            if request.form.get('confirm') != str(tid):
+                flash('Nhập đúng mã HLV để xác nhận xóa.')
+            else:
+                c.execute('UPDATE plans SET active=0 WHERE active=1 AND member IN (SELECT id FROM members WHERE trainer=?)',(tid,))
+                c.execute('UPDATE members SET trainer=NULL WHERE trainer=?',(tid,))
+                c.execute("UPDATE trainer_requests SET status='cancelled',responded=? WHERE trainer=? AND status IN ('pending','accepted')",(datetime.now().isoformat(),tid))
+                # Preserve the trainer row for history, while freeing their old login name.
+                c.execute("UPDATE users SET active=0,auth_version=auth_version+1,full_name=?,username=? WHERE id=?",
+                          (trainer['full_name'] or trainer['username'],'deleted-trainer:'+str(tid)+':'+secrets.token_hex(8),tid))
+                flash('Đã xóa HLV và khóa tài khoản. Hội viên có thể chọn HLV khác; gói Gym và hóa đơn được giữ nguyên.')
+                return redirect('/trainers')
+    return render_template('delete_trainer.html',trainer=trainer,affected=affected,pending_count=pending_count)
 
 
 @app.route('/members',methods=['GET','POST'])
@@ -388,7 +414,7 @@ def members():
             query += " AND m.trainer=? AND EXISTS(SELECT 1 FROM trainer_requests confirmed WHERE confirmed.member=m.id AND confirmed.trainer=? AND confirmed.status='accepted')"
             params = (session['uid'],session['uid'])
         rows = c.execute(query + ' ORDER BY m.id DESC',params).fetchall()
-        trainers = c.execute("SELECT * FROM users WHERE role='trainer'").fetchall()
+        trainers = c.execute("SELECT * FROM users WHERE role='trainer' AND active=1").fetchall()
     return render_template('members.html',rows=rows,trainers=trainers)
 
 

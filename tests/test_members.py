@@ -475,4 +475,76 @@ class MemberFlow(unittest.TestCase):
    self.assertNotIn('href="/plans',page);self.assertNotIn('>Lập lịch<',page)
   with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM plans').fetchone()[0],1)
 
+ def test_delete_trainer_cancels_links_and_preserves_other_trainers_and_invoices(self):
+  self.signup();self.login();member_client=self.c
+  self.post('/account',{'package':1})
+  with db() as c:
+   tid=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+   peer=c.execute("INSERT INTO users(username,password,role,full_name) SELECT 'peer',password,role,'Peer Trainer' FROM users WHERE id=?",(tid,)).lastrowid
+  self.post('/account',dict(action='trainer_request',trainer=tid))
+  with db() as c: rid=c.execute('SELECT id FROM trainer_requests').fetchone()[0]
+  hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
+  self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'},hlv)
+  self.post('/plans',dict(member=1,exercise=1,sets=3,reps=15,days=['2']),hlv)
+  pending_client=app.test_client()
+  self.post('/logout',{});self.signup(phone='0901234568',email='b@example.com');self.login('0901234568',client=pending_client)
+  self.post('/account',dict(action='trainer_request',trainer=tid),pending_client)
+  self.signup(phone='0901234569',email='c@example.com')
+  peer_member=app.test_client();self.login('0901234569',client=peer_member)
+  self.post('/account',dict(action='trainer_request',trainer=peer),peer_member)
+  with db() as c: peer_rid=c.execute('SELECT max(id) FROM trainer_requests').fetchone()[0]
+  peer_client=app.test_client();self.login('peer','Gym@12345',peer_client)
+  self.post(f'/trainer-requests/{peer_rid}/respond',{'decision':'accept'},peer_client)
+  self.post('/plans',dict(member=3,exercise=2,sets=3,reps=15,days=['3']),peer_client)
+  with db() as c: invoices=[tuple(r) for r in c.execute('SELECT * FROM invoices')]
+  admin=app.test_client();self.login('admin','Gym@12345',admin)
+  url=f'/trainers/{tid}/delete'
+  self.assertEqual(admin.get(url).status_code,200)
+  self.assertEqual(admin.post(url,data={'confirm':str(tid)}).status_code,400)
+  self.post(url,{'confirm':'wrong'},admin)
+  with db() as c: self.assertEqual(c.execute('SELECT active FROM users WHERE id=?',(tid,)).fetchone()[0],1)
+  self.assertEqual(self.post(url,{'confirm':str(tid)},admin).status_code,302)
+  self.assertEqual(hlv.get('/trainer-requests').status_code,302)
+  self.assertEqual(self.login('hlv','Gym@12345',hlv).status_code,200)
+  with db() as c:
+   self.assertEqual(c.execute('SELECT active FROM users WHERE id=?',(tid,)).fetchone()[0],0)
+   self.assertIsNone(c.execute('SELECT trainer FROM members WHERE id=1').fetchone()[0])
+   self.assertEqual(c.execute("SELECT count(*) FROM trainer_requests WHERE trainer=? AND status='cancelled'",(tid,)).fetchone()[0],2)
+   self.assertEqual(c.execute('SELECT active FROM plans WHERE member=1').fetchone()[0],0)
+   self.assertEqual(c.execute('SELECT active FROM plans WHERE member=3').fetchone()[0],1)
+   self.assertEqual(c.execute('SELECT trainer FROM members WHERE id=3').fetchone()[0],peer)
+   self.assertEqual([tuple(r) for r in c.execute('SELECT * FROM invoices')],invoices)
+  self.assertEqual(self.post(url,{'confirm':str(tid)},admin).status_code,404)
+  self.post('/account',dict(action='trainer_request',trainer=tid),pending_client)
+  with db() as c: self.assertEqual(c.execute("SELECT count(*) FROM trainer_requests WHERE trainer=? AND status='pending'",(tid,)).fetchone()[0],0)
+  self.post('/account',dict(action='trainer_request',trainer=peer),pending_client)
+  with db() as c: self.assertEqual(c.execute("SELECT count(*) FROM trainer_requests WHERE trainer=? AND status='pending'",(peer,)).fetchone()[0],1)
+  # Reception can recreate the old login name as a new trainer, then delete that trainer.
+  reception=app.test_client();self.login('letan','Gym@12345',reception)
+  data=dict(username='hlv',full_name='Replacement Trainer',password='Replacement123',confirm_password='Replacement123')
+  self.assertEqual(self.post('/trainers',data,reception).status_code,302)
+  with db() as c: new_tid=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+  self.assertNotEqual(new_tid,tid)
+  self.assertEqual(self.login('hlv','Replacement123').status_code,302)
+  self.assertEqual(self.post(f'/trainers/{new_tid}/delete',{'confirm':str(new_tid)},reception).status_code,302)
+  self.assertEqual(peer_client.get('/plans').status_code,200)
+
+ def test_only_staff_can_delete_trainer_and_cannot_delete_non_trainers(self):
+  with db() as c:
+   tid=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+   admin_id=c.execute("SELECT id FROM users WHERE username='admin'").fetchone()[0]
+   reception_id=c.execute("SELECT id FROM users WHERE username='letan'").fetchone()[0]
+  url=f'/trainers/{tid}/delete'
+  self.assertEqual(self.c.get(url).status_code,302)
+  self.signup();self.login()
+  self.assertEqual(self.c.get(url).status_code,403)
+  self.assertEqual(self.post(url,{'confirm':str(tid)}).status_code,403)
+  self.post('/logout',{});self.login('hlv','Gym@12345')
+  self.assertEqual(self.post(url,{'confirm':str(tid)}).status_code,403)
+  for staffname in ['admin','letan']:
+   staff=app.test_client();self.login(staffname,'Gym@12345',staff)
+   for uid in [admin_id,reception_id,99999]:
+    self.assertEqual(self.post(f'/trainers/{uid}/delete',{'confirm':str(uid)},staff).status_code,404)
+  with db() as c: self.assertEqual(c.execute('SELECT active FROM users WHERE id=?',(tid,)).fetchone()[0],1)
+
 if __name__=='__main__': unittest.main()

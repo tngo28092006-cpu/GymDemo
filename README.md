@@ -140,3 +140,11 @@ Vai trò luôn là trainer, người tạo không thể dùng form này để t�
 Database mới không tự tạo hlv mặc định; tài khoản HLV cũ được giữ nguyên.
 HLV vừa tạo xuất hiện trong danh sách để hội viên chọn, cần xác nhận trước khi lập lịch.
 Admin/lễ tân không có nút Lịch tập hoặc Lập lịch; truy cập trực tiếp /plans và xóa lịch cũng bị chặn.
+
+## Xóa HLV
+Admin/lễ tân > Quản lý HLV > Xóa HLV > nhập mã xác nhận. Chỉ xóa tài khoản có vai trò HLV.
+Tài khoản HLV bị ẩn/khóa, mọi phiên cũ bị chặn; không xóa dữ liệu lịch sử khỏi database.
+Yêu cầu đang chờ/đã nhận với HLV đó chuyển thành Đã hủy, các hội viên bỏ liên kết HLV.
+Lịch tập đang hoạt động của những hội viên đang thuộc HLV bị xóa được dừng, giữ lịch sử.
+Gói Gym và hóa đơn không đổi; hội viên có thể chọn HLV khác. Các HLV/hội viên khác không bị ảnh hưởng.
+Tên đăng nhập cũ được giải phóng để có thể tạo HLV mới; tài khoản mới có ID riêng, không nhận dữ liệu cũ.
