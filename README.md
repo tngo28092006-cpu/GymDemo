@@ -110,10 +110,18 @@ HLV có trang Hội viên chỉ đọc và mục Yêu cầu HLV để xác nhậ
 2. HLV đăng nhập > Yêu cầu HLV > Xác nhận làm HLV hoặc Từ chối.
 3. Chỉ sau khi xác nhận, HLV mới được tạo/xóa lịch cho hội viên đó.
 - Hội viên có thể hủy yêu cầu đang chờ để chọn HLV khác. Mỗi người chỉ có một yêu cầu chờ.
-- Khi đã được nhận, không tạo yêu cầu mới hoặc đổi HLV qua giao diện hiện tại.
+- Khi đã được nhận: Hủy đăng ký HLV > xác nhận, sau đó chọn HLV khác và chờ xác nhận mới.
 - Lễ tân/admin có thể gửi yêu cầu hỗ trợ tại quầy, không thể bỏ qua xác nhận của HLV.
 - Không còn tự phân công khi tạo lịch; cả admin cũng không tạo lịch trước xác nhận.
 - Chỉ HLV được chọn mới xử lý yêu cầu đó. Yêu cầu đã xử lý/hủy không được xử lý lại.
 - Xóa hội viên hủy yêu cầu chờ; giữ lịch sử đã có.
 - Nâng cấp lần đầu: phân công cũ chuyển thành yêu cầu chờ HLV xác nhận; giữ lịch tập/hóa đơn cũ.
   Chạy lại không tạo trùng hay đặt lại yêu cầu đã được chấp nhận.
+
+## Hủy đăng ký HLV đã được nhận
+Trang cá nhân > Hủy đăng ký HLV > Xác nhận hủy. Yêu cầu chuyển sang Đã hủy, bỏ liên kết HLV.
+Lịch tập hiện tại được đánh dấu ngừng hoạt động, giữ dữ liệu cũ nhưng không hiển thị như lịch hiện tại
+và không tính vào giới hạn ngày tập. HLV cũ không lập/xóa lịch của hội viên được nữa.
+Gói Gym, thời hạn, hóa đơn và số tiền đã thanh toán không bị thay đổi; không có phí HLV riêng ở bản demo.
+Hội viên có thể gửi yêu cầu chọn HLV mới; cần xác nhận mới trước khi lập lịch mới.
+Đổi mật khẩu được đặt bên phải Lưu email trong phần thông tin cá nhân.

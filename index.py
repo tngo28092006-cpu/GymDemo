@@ -29,6 +29,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), max_days INTEGER);
         INSERT OR IGNORE INTO settings VALUES(1,6);
         ''')
+        if 'active' not in {r['name'] for r in c.execute('PRAGMA table_info(plans)')}:
+            c.execute('ALTER TABLE plans ADD COLUMN active INTEGER NOT NULL DEFAULT 1')
         if 'auth_version' not in {r['name'] for r in c.execute('PRAGMA table_info(users)')}:
             c.execute('ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0')
         if 'deleted_at' not in {r['name'] for r in c.execute('PRAGMA table_info(members)')}:
@@ -245,7 +247,7 @@ def account():
                 flash('Đã đăng ký gói tập. Vui lòng thanh toán tại quầy. '+confirmation(member['email'],member['name']))
             return redirect('/account')
         invoices = c.execute('SELECT * FROM invoices WHERE member=? ORDER BY id DESC', (member['id'],)).fetchall()
-        plans = c.execute('SELECT p.*,e.name exercise_name FROM plans p JOIN exercises e ON e.id=p.exercise WHERE p.member=?', (member['id'],)).fetchall()
+        plans = c.execute('SELECT p.*,e.name exercise_name FROM plans p JOIN exercises e ON e.id=p.exercise WHERE p.member=? AND p.active=1', (member['id'],)).fetchall()
         active = c.execute('SELECT * FROM invoices WHERE member=? AND paid_at IS NOT NULL AND starts<=? AND expires>? ORDER BY expires DESC LIMIT 1',
                            (member['id'],date.today().isoformat(),date.today().isoformat())).fetchone()
         packages = c.execute('SELECT * FROM packages ORDER BY months').fetchall()
@@ -254,6 +256,30 @@ def account():
         pending_request = next((r for r in trainer_requests if r['status']=='pending'),None)
     return render_template('account.html',member=member,invoices=invoices,plans=plans,active=active,packages=packages,
                            pending=any(not i['paid_at'] for i in invoices),trainers=trainers,trainer_requests=trainer_requests,pending_request=pending_request)
+
+
+@app.route('/account/trainer/cancel', methods=['GET','POST'])
+@require('member')
+def cancel_trainer():
+    if session['role'] != 'member': abort(403)
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        member = c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.user_id=? AND m.deleted_at IS NULL',(session['uid'],)).fetchone()
+        if not member: abort(403)
+        accepted = c.execute("SELECT id FROM trainer_requests WHERE member=? AND trainer=? AND status='accepted' ORDER BY id DESC LIMIT 1",(member['id'],member['trainer'])).fetchone()
+        if not member['trainer'] or not accepted:
+            flash('Bạn chưa có đăng ký HLV được xác nhận để hủy.')
+            return redirect('/account')
+        if request.method == 'POST':
+            if request.form.get('request_id') != str(accepted['id']):
+                flash('Đăng ký HLV đã thay đổi. Hãy mở lại trang xác nhận trước khi hủy.')
+                return redirect('/account')
+            c.execute("UPDATE trainer_requests SET status='cancelled',responded=? WHERE member=? AND trainer=? AND status='accepted'",(datetime.now().isoformat(),member['id'],member['trainer']))
+            c.execute('UPDATE members SET trainer=NULL WHERE id=?',(member['id'],))
+            c.execute('UPDATE plans SET active=0 WHERE member=? AND active=1',(member['id'],))
+            flash('Đã hủy đăng ký HLV và dừng lịch tập hiện tại. Bạn có thể chọn HLV khác; gói Gym và thanh toán được giữ nguyên.')
+            return redirect('/account')
+    return render_template('cancel_trainer.html',member=member,accepted=accepted)
 
 
 @app.route('/account/password', methods=['GET', 'POST'])
@@ -417,7 +443,7 @@ def plans():
                 if session['role'] != 'admin' and member['trainer'] != session['uid']:
                     abort(403)
                 existing = set()
-                for row in c.execute('SELECT days FROM plans WHERE member=?', (mid,)):
+                for row in c.execute('SELECT days FROM plans WHERE active=1 AND member=?', (mid,)):
                     existing.update(row['days'].split(','))
                 if (not days or not set(days)<=set('2345678') or len(existing|set(days))>limit
                     or not 1<=sets<=100 or not 1<=reps<=1000
@@ -428,7 +454,7 @@ def plans():
                 return redirect(url_for('plans', member=mid))
             except (ValueError,KeyError):
                 flash(f'Thông tin không hợp lệ. Chọn hội viên, bài tập và từ 1 đến {limit} ngày tập/tuần.')
-        rows = c.execute("SELECT p.*,m.name,e.name exercise_name FROM plans p JOIN members m ON m.id=p.member JOIN exercises e ON e.id=p.exercise WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted') AND (m.trainer=? OR ?='admin')",(session['uid'],session['role'])).fetchall()
+        rows = c.execute("SELECT p.*,m.name,e.name exercise_name FROM plans p JOIN members m ON m.id=p.member JOIN exercises e ON e.id=p.exercise WHERE p.active=1 AND m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted') AND (m.trainer=? OR ?='admin')",(session['uid'],session['role'])).fetchall()
         exercises = c.execute('SELECT * FROM exercises WHERE active=1').fetchall()
         can_schedule = any(session['role']=='admin' or m['trainer']==session['uid'] for m in available)
     return render_template('plans.html',rows=rows,members=available,exercises=exercises,limit=limit,can_schedule=can_schedule,selected_member=request.args.get('member', type=int))
@@ -437,7 +463,7 @@ def plans():
 @require('trainer')
 def delete_plan(pid):
     with db() as c:
-        c.execute("DELETE FROM plans WHERE id=? AND member IN (SELECT m.id FROM members m WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted') AND (m.trainer=? OR ?='admin'))",(pid,session['uid'],session['role']))
+        c.execute("DELETE FROM plans WHERE id=? AND active=1 AND member IN (SELECT m.id FROM members m WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted') AND (m.trainer=? OR ?='admin'))",(pid,session['uid'],session['role']))
     return redirect('/plans')
 
 @app.route('/settings',methods=['GET','POST'])
@@ -454,9 +480,9 @@ def settings():
                 elif f['action']=='limit':
                     n=int(f['limit'])
                     if not 1<=n<=7: raise ValueError()
-                    for m in c.execute('SELECT DISTINCT member FROM plans'):
+                    for m in c.execute('SELECT DISTINCT member FROM plans WHERE active=1'):
                         days=set()
-                        for r in c.execute('SELECT days FROM plans WHERE member=?',(m['member'],)): days.update(r['days'].split(','))
+                        for r in c.execute('SELECT days FROM plans WHERE active=1 AND member=?',(m['member'],)): days.update(r['days'].split(','))
                         if len(days)>n: raise ValueError()
                     c.execute('UPDATE settings SET max_days=?',(n,))
                 elif f['action'] in ['add','edit']:

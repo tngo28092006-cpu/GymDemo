@@ -339,4 +339,55 @@ class MemberFlow(unittest.TestCase):
   self.assertEqual(self.c.get('/payments').status_code,200)
   self.assertEqual(self.c.get('/members').status_code,200)
 
+ def test_cancel_confirmed_trainer_and_choose_new_one(self):
+  self.signup();self.login();self.post('/account',{'package':1})
+  with db() as c:
+   mid=c.execute('SELECT id FROM members').fetchone()[0]
+   trainer=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+   peer=c.execute("INSERT INTO users(username,password,role) SELECT 'hlv2',password,role FROM users WHERE username='hlv'").lastrowid
+   invoice=tuple(c.execute('SELECT * FROM invoices').fetchone())
+   c.execute('UPDATE settings SET max_days=1')
+  self.post('/account',dict(action='trainer_request',trainer=trainer))
+  with db() as c: rid=c.execute('SELECT id FROM trainer_requests').fetchone()[0]
+  hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
+  self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'},hlv)
+  self.post('/plans',dict(member=mid,exercise=1,sets=3,reps=15,days=['2']),hlv)
+  self.assertIn('Hủy đăng ký HLV',self.c.get('/account').get_data(as_text=True))
+  self.assertEqual(self.c.get('/account/trainer/cancel').status_code,200)
+  self.assertEqual(self.c.post('/account/trainer/cancel',data={'request_id':rid}).status_code,400)
+  self.post('/account/trainer/cancel',{'request_id':99999})
+  with db() as c: self.assertEqual(c.execute('SELECT trainer FROM members').fetchone()[0],trainer)
+  self.assertEqual(self.post('/account/trainer/cancel',{'request_id':rid}).status_code,302)
+  with db() as c:
+   self.assertIsNone(c.execute('SELECT trainer FROM members').fetchone()[0])
+   self.assertEqual(c.execute('SELECT status FROM trainer_requests').fetchone()[0],'cancelled')
+   self.assertEqual(c.execute('SELECT active FROM plans').fetchone()[0],0)
+   self.assertEqual(tuple(c.execute('SELECT * FROM invoices').fetchone()),invoice)
+  self.assertNotIn('Squat',self.c.get('/account').get_data(as_text=True))
+  self.post('/plans',dict(member=mid,exercise=1,sets=3,reps=15,days=['2']),hlv)
+  self.post('/plans/1/delete',{},hlv)
+  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM plans').fetchone()[0],1)
+  self.post('/account',dict(action='trainer_request',trainer=peer))
+  with db() as c: rid2=c.execute('SELECT max(id) FROM trainer_requests').fetchone()[0]
+  hlv2=app.test_client();self.login('hlv2','Gym@12345',hlv2)
+  self.post(f'/trainer-requests/{rid2}/respond',{'decision':'accept'},hlv2)
+  self.post('/account/trainer/cancel',{'request_id':rid})  # Stale form cannot cancel a new HLV.
+  with db() as c: self.assertEqual(c.execute('SELECT trainer FROM members').fetchone()[0],peer)
+  self.assertEqual(self.post('/plans',dict(member=mid,exercise=2,sets=3,reps=15,days=['3']),hlv2).status_code,302)
+  page=self.c.get('/account').get_data(as_text=True)
+  self.assertIn('Bench press',page);self.assertNotIn('Squat',page)
+
+ def test_cannot_cancel_another_members_trainer(self):
+  self.signup();self.signup(phone='0901234568',email='b@example.com')
+  with db() as c:
+   trainer=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+  self.login();self.post('/account',dict(action='trainer_request',trainer=trainer))
+  with db() as c: rid=c.execute('SELECT id FROM trainer_requests').fetchone()[0]
+  hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
+  self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'},hlv)
+  other=app.test_client();self.login('0901234568',client=other)
+  self.post('/account/trainer/cancel',{'request_id':rid,'member':1},other)
+  with db() as c: self.assertEqual(c.execute('SELECT trainer FROM members WHERE id=1').fetchone()[0],trainer)
+  self.assertEqual(self.post('/account/trainer/cancel',{'request_id':rid},hlv).status_code,403)
+
 if __name__=='__main__': unittest.main()
