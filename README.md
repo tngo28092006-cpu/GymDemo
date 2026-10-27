@@ -148,3 +148,9 @@ Yêu cầu đang chờ/đã nhận với HLV đó chuyển thành Đã hủy, c�
 Lịch tập đang hoạt động của những hội viên đang thuộc HLV bị xóa được dừng, giữ lịch sử.
 Gói Gym và hóa đơn không đổi; hội viên có thể chọn HLV khác. Các HLV/hội viên khác không bị ảnh hưởng.
 Tên đăng nhập cũ được giải phóng để có thể tạo HLV mới; tài khoản mới có ID riêng, không nhận dữ liệu cũ.
+
+## Trang chính của HLV
+Sau đăng nhập, HLV thấy bảng Lịch đã xếp: hội viên, bài tập, số hiệp, số lần/hiệp và ngày tập.
+Chỉ hiển thị lịch đang hoạt động của người đã được chính HLV đó xác nhận.
+Không hiển thị hoặc truy vấn dữ liệu doanh thu/đăng ký theo tháng trên trang chính HLV.
+Admin/lễ tân vẫn xem Tổng quan thống kê như trước. Trang Lịch tập vẫn dùng để thêm/xóa bài tập.

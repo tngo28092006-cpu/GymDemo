@@ -547,4 +547,24 @@ class MemberFlow(unittest.TestCase):
     self.assertEqual(self.post(f'/trainers/{uid}/delete',{'confirm':str(uid)},staff).status_code,404)
   with db() as c: self.assertEqual(c.execute('SELECT active FROM users WHERE id=?',(tid,)).fetchone()[0],1)
 
+ def test_trainer_home_shows_only_own_active_schedules_without_financial_charts(self):
+  self.login('hlv','Gym@12345')
+  empty=self.c.get('/').get_data(as_text=True)
+  self.assertIn('Bạn chưa có lịch tập đã xếp',empty)
+  with db() as c:
+   tid=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+   peer=c.execute("INSERT INTO users(username,password,role) SELECT 'peer',password,role FROM users WHERE id=?",(tid,)).lastrowid
+   for name,owner,status,deleted in [('OwnSchedule',tid,'accepted',None),('PeerSchedule',peer,'accepted',None),('PendingSchedule',None,'pending',None),('DeletedSchedule',tid,'accepted','2026-01-01')]:
+    mid=c.execute('INSERT INTO members(name,trainer,deleted_at) VALUES(?,?,?)',(name,owner,deleted)).lastrowid
+    c.execute('INSERT INTO trainer_requests(member,trainer,status,created) VALUES(?,?,?,?)',(mid,owner or tid,status,'2026-01-01'))
+    c.execute("INSERT INTO plans(member,exercise,sets,reps,days) VALUES(?,1,3,15,'2,4,6')",(mid,))
+   c.execute("INSERT INTO plans(member,exercise,sets,reps,days,active) VALUES(1,3,4,10,'3',0)")
+  page=self.c.get('/').get_data(as_text=True)
+  self.assertIn('Lịch đã xếp cho hội viên',page);self.assertIn('OwnSchedule',page)
+  self.assertIn('Squat',page);self.assertIn('Thứ 2, Thứ 4, Thứ 6',page)
+  for text in ['PeerSchedule','PendingSchedule','DeletedSchedule','Deadlift','Doanh thu','Đăng ký theo tháng','chart.js']:
+   self.assertNotIn(text,page)
+  self.post('/logout',{});self.login('admin','Gym@12345')
+  self.assertIn('Doanh thu',self.c.get('/').get_data(as_text=True))
+
 if __name__=='__main__': unittest.main()

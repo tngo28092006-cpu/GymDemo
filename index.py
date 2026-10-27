@@ -334,10 +334,18 @@ def reset_member_password(mid):
     return render_template('password.html', member=member)
 
 
+def trainer_schedule_rows(c, trainer_id):
+    return c.execute("SELECT p.*,m.name,e.name exercise_name FROM plans p JOIN members m ON m.id=p.member JOIN exercises e ON e.id=p.exercise WHERE p.active=1 AND m.deleted_at IS NULL AND m.trainer=? AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=? AND r.status='accepted') ORDER BY m.name,m.id,p.id", (trainer_id,trainer_id)).fetchall()
+
+
 @app.get('/')
 @require()
 def dashboard():
     if session['role']=='member': return redirect('/account')
+    if session['role']=='trainer':
+        with db() as c:
+            rows = trainer_schedule_rows(c,session['uid'])
+        return render_template('trainer_dashboard.html',rows=rows)
     with db() as c:
         members=c.execute('SELECT count(*) FROM members WHERE deleted_at IS NULL').fetchone()[0]
         active=c.execute('SELECT count(DISTINCT member) FROM invoices WHERE paid_at IS NOT NULL AND starts<=? AND expires>? AND member IN (SELECT id FROM members WHERE deleted_at IS NULL)',(date.today().isoformat(),date.today().isoformat())).fetchone()[0]
@@ -521,7 +529,7 @@ def plans():
                 return redirect(url_for('plans', member=mid))
             except (ValueError,KeyError):
                 flash(f'Thông tin không hợp lệ. Chọn hội viên, bài tập và từ 1 đến {limit} ngày tập/tuần.')
-        rows = c.execute("SELECT p.*,m.name,e.name exercise_name FROM plans p JOIN members m ON m.id=p.member JOIN exercises e ON e.id=p.exercise WHERE p.active=1 AND m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted') AND (m.trainer=? OR ?='admin')",(session['uid'],session['role'])).fetchall()
+        rows = trainer_schedule_rows(c,session['uid'])
         exercises = c.execute('SELECT * FROM exercises WHERE active=1').fetchall()
         can_schedule = any(session['role']=='admin' or m['trainer']==session['uid'] for m in available)
     return render_template('plans.html',rows=rows,members=available,exercises=exercises,limit=limit,can_schedule=can_schedule,selected_member=request.args.get('member', type=int))
