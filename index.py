@@ -352,7 +352,12 @@ def members():
             c.execute('BEGIN IMMEDIATE')
             flash(request_trainer(c,request.form.get('member',''),request.form.get('trainer','')))
             return redirect('/members')
-        rows = c.execute("SELECT m.*,u.username trainer_name,r.id pending_request_id,pt.username pending_trainer FROM members m LEFT JOIN users u ON u.id=m.trainer LEFT JOIN trainer_requests r ON r.member=m.id AND r.status='pending' LEFT JOIN users pt ON pt.id=r.trainer WHERE m.deleted_at IS NULL ORDER BY m.id DESC").fetchall()
+        query = "SELECT m.*,u.username trainer_name,r.id pending_request_id,pt.username pending_trainer FROM members m LEFT JOIN users u ON u.id=m.trainer LEFT JOIN trainer_requests r ON r.member=m.id AND r.status='pending' LEFT JOIN users pt ON pt.id=r.trainer WHERE m.deleted_at IS NULL"
+        params = ()
+        if session['role'] == 'trainer':
+            query += " AND m.trainer=? AND EXISTS(SELECT 1 FROM trainer_requests confirmed WHERE confirmed.member=m.id AND confirmed.trainer=? AND confirmed.status='accepted')"
+            params = (session['uid'],session['uid'])
+        rows = c.execute(query + ' ORDER BY m.id DESC',params).fetchall()
         trainers = c.execute("SELECT * FROM users WHERE role='trainer'").fetchall()
     return render_template('members.html',rows=rows,trainers=trainers)
 
@@ -431,7 +436,12 @@ def plans():
     with db() as c:
         # Only accepted trainer requests authorize scheduling.
         if request.method == 'POST': c.execute('BEGIN IMMEDIATE')
-        available = c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status=\'accepted\') ORDER BY m.name,m.id').fetchall()
+        query = "SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted')"
+        params = ()
+        if session['role'] == 'trainer':
+            query += ' AND m.trainer=?'
+            params = (session['uid'],)
+        available = c.execute(query + ' ORDER BY m.name,m.id',params).fetchall()
         limit = c.execute('SELECT max_days FROM settings').fetchone()[0]
         if request.method == 'POST':
             try:

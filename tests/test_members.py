@@ -242,7 +242,7 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(c.execute('SELECT count(*) FROM trainer_requests').fetchone()[0],1)
    rid=c.execute('SELECT id FROM trainer_requests').fetchone()[0]
   hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
-  self.assertIn('Hoi Vien A',hlv.get('/members').get_data(as_text=True))
+  self.assertNotIn('Hoi Vien A',hlv.get('/members').get_data(as_text=True))
   self.assertIn('Xác nhận làm HLV',hlv.get('/trainer-requests').get_data(as_text=True))
   data=dict(member=mid,exercise=1,sets=3,reps=15,days=['2','4','6'])
   self.post('/plans',data,hlv)
@@ -389,5 +389,30 @@ class MemberFlow(unittest.TestCase):
   self.post('/account/trainer/cancel',{'request_id':rid,'member':1},other)
   with db() as c: self.assertEqual(c.execute('SELECT trainer FROM members WHERE id=1').fetchone()[0],trainer)
   self.assertEqual(self.post('/account/trainer/cancel',{'request_id':rid},hlv).status_code,403)
+
+ def test_trainer_roster_and_plan_picker_only_show_own_confirmed_members(self):
+  with db() as c:
+   trainer=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+   peer=c.execute("INSERT INTO users(username,password,role) SELECT 'hlv2',password,role FROM users WHERE username='hlv'").lastrowid
+   cases=[('OwnConfirmed',trainer,'accepted',None),('PeerConfirmed',peer,'accepted',None),('UnassignedPerson',None,None,None),('PendingPerson',None,'pending',None),('CancelledPerson',None,'cancelled',None),('DeletedPerson',trainer,'accepted','2026-01-01'),('PointerWithoutConsent',trainer,None,None)]
+   for name,owner,status,deleted in cases:
+    mid=c.execute('INSERT INTO members(name,phone,trainer,deleted_at) VALUES(?,?,?,?)',(name,'0900000000',owner,deleted)).lastrowid
+    if status:
+     c.execute('INSERT INTO trainer_requests(member,trainer,status,created) VALUES(?,?,?,?)',(mid,owner or trainer,status,'2026-01-01'))
+  self.login('hlv','Gym@12345')
+  for path in ['/members','/plans','/plans?member=2']:
+   page=self.c.get(path).get_data(as_text=True)
+   self.assertIn('OwnConfirmed',page)
+   for name in ['PeerConfirmed','UnassignedPerson','PendingPerson','CancelledPerson','DeletedPerson','PointerWithoutConsent']:
+    self.assertNotIn(name,page)
+  self.assertIn('PendingPerson',self.c.get('/trainer-requests').get_data(as_text=True))
+  self.post('/logout',{});self.login('hlv2','Gym@12345')
+  page=self.c.get('/members').get_data(as_text=True)
+  self.assertIn('PeerConfirmed',page);self.assertNotIn('OwnConfirmed',page)
+  self.post('/logout',{});self.login('letan','Gym@12345')
+  page=self.c.get('/members').get_data(as_text=True)
+  for name in ['OwnConfirmed','PeerConfirmed','UnassignedPerson','PendingPerson','CancelledPerson','PointerWithoutConsent']:
+   self.assertIn(name,page)
+  self.assertNotIn('DeletedPerson',page)
 
 if __name__=='__main__': unittest.main()

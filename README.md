@@ -125,3 +125,9 @@ và không tính vào giới hạn ngày tập. HLV cũ không lập/xóa lịch
 Gói Gym, thời hạn, hóa đơn và số tiền đã thanh toán không bị thay đổi; không có phí HLV riêng ở bản demo.
 Hội viên có thể gửi yêu cầu chọn HLV mới; cần xác nhận mới trước khi lập lịch mới.
 Đổi mật khẩu được đặt bên phải Lưu email trong phần thông tin cá nhân.
+
+## Danh sách hội viên của HLV
+HLV chỉ thấy người có liên kết hiện tại với chính HLV đó và có yêu cầu Đã nhận.
+Áp dụng cả trang Hội viên và danh sách chọn tại Lịch tập; không trả thông tin hội viên khác ra HTML.
+Người chưa đăng ký, đang chờ, đã hủy, đã xóa hoặc thuộc HLV khác không xuất hiện.
+Yêu cầu đang chờ vẫn hiển thị riêng ở Yêu cầu HLV. Lễ tân/admin vẫn xem danh sách chung.
