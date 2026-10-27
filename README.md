@@ -11,17 +11,17 @@ SQLite gym.db tự tạo khi chạy index.py lần đầu. Khởi động lại 
 
 ## Tài khoản mẫu
 Mật khẩu chung ban đầu: Gym@12345
-- admin: toàn quyền
+- admin: quản lý, báo cáo, quy định, tạo tài khoản HLV; không xếp lịch tập
 - letan: quản lý hội viên, gửi yêu cầu HLV, thu tiền và đặt lại mật khẩu hội viên
-- hlv: xem danh sách hội viên, xác nhận yêu cầu hội viên và lập/xóa lịch được phân công
+- HLV: do admin hoặc lễ tân tạo tại Quản lý HLV, nhận yêu cầu và lập/xóa lịch được phân công
 Đăng ký tài khoản trực tuyến: http://127.0.0.1:5000/signup.
 Có thể đặt biến môi trường DEMO_PASSWORD trước lần chạy đầu để đổi mật khẩu khởi tạo.
 
 ## Kịch bản chạy thử
 1. Tạo tài khoản tại /signup, đăng nhập rồi chọn gói tại /account.
-2. Hội viên vào Trang cá nhân, chọn hlv và gửi yêu cầu đăng ký HLV.
+2. Admin/lễ tân vào Quản lý HLV để tạo tài khoản; hội viên chọn HLV đó tại trang cá nhân và gửi yêu cầu.
 3. Đăng nhập admin hoặc letan, vào Thanh toán, xác nhận đã thu tiền.
-4. Đăng nhập hlv, vào Yêu cầu HLV và xác nhận, sau đó tạo Squat, 3 hiệp, 15 lần, Thứ 2/4/6.
+4. Đăng nhập tài khoản HLV vừa tạo, vào Yêu cầu HLV và xác nhận, sau đó tạo Squat, 3 hiệp, 15 lần, Thứ 2/4/6.
 5. Xem Tổng quan: hội viên còn hạn, đăng ký và doanh thu theo tháng trong năm hiện tại.
 6. Admin vào Quy định để đổi giá, thêm/sửa/xóa bài tập và giới hạn ngày tập.
 
@@ -32,7 +32,7 @@ Có thể đặt biến môi trường DEMO_PASSWORD trước lần chạy đầ
 - Tổng số ngày KHÁC NHAU trong mọi bài tập của một hội viên không vượt giới hạn.
 - Giảm giới hạn bị chặn nếu lịch hiện tại vượt mức mới: sửa/xóa lịch trước.
 - Xóa danh mục là ẩn bài tập, giữ lịch tập đã tạo.
-- Bản thử nghiệm chưa có hoàn tiền, xuất hóa đơn PDF hoặc quản lý tài khoản nhân viên. Mỗi lần đăng ký mới tạo một hội viên mới. Lịch sử thanh toán thể hiện trong bảng hóa đơn theo mã hội viên.
+- Bản thử nghiệm chưa có hoàn tiền, xuất hóa đơn PDF hoặc quản lý đầy đủ tài khoản nhân viên ngoài việc tạo HLV. Mỗi lần đăng ký mới tạo một hội viên mới. Lịch sử thanh toán thể hiện trong bảng hóa đơn theo mã hội viên.
 
 ## Email SMTP (tùy chọn)
 Trong PyCharm: Run > Edit Configurations > Environment variables, thêm:
@@ -112,7 +112,7 @@ HLV có trang Hội viên chỉ đọc và mục Yêu cầu HLV để xác nhậ
 - Hội viên có thể hủy yêu cầu đang chờ để chọn HLV khác. Mỗi người chỉ có một yêu cầu chờ.
 - Khi đã được nhận: Hủy đăng ký HLV > xác nhận, sau đó chọn HLV khác và chờ xác nhận mới.
 - Lễ tân/admin có thể gửi yêu cầu hỗ trợ tại quầy, không thể bỏ qua xác nhận của HLV.
-- Không còn tự phân công khi tạo lịch; cả admin cũng không tạo lịch trước xác nhận.
+- Không còn tự phân công khi tạo lịch. Chỉ HLV đã xác nhận được lập lịch; admin/lễ tân không xếp lịch.
 - Chỉ HLV được chọn mới xử lý yêu cầu đó. Yêu cầu đã xử lý/hủy không được xử lý lại.
 - Xóa hội viên hủy yêu cầu chờ; giữ lịch sử đã có.
 - Nâng cấp lần đầu: phân công cũ chuyển thành yêu cầu chờ HLV xác nhận; giữ lịch tập/hóa đơn cũ.
@@ -130,4 +130,13 @@ Hội viên có thể gửi yêu cầu chọn HLV mới; cần xác nhận mới
 HLV chỉ thấy người có liên kết hiện tại với chính HLV đó và có yêu cầu Đã nhận.
 Áp dụng cả trang Hội viên và danh sách chọn tại Lịch tập; không trả thông tin hội viên khác ra HTML.
 Người chưa đăng ký, đang chờ, đã hủy, đã xóa hoặc thuộc HLV khác không xuất hiện.
-Yêu cầu đang chờ vẫn hiển thị riêng ở Yêu cầu HLV. Lễ tân/admin vẫn xem danh sách chung.
+Yêu cầu đang chờ vẫn hiển thị riêng ở Yêu cầu HLV. Lễ tân/admin vẫn xem danh sách chung, không lập lịch tập.
+
+## Tạo tài khoản HLV và quyền xếp lịch
+Admin hoặc lễ tân vào Quản lý HLV > nhập họ tên, tên đăng nhập, mật khẩu và nhập lại > Tạo tài khoản.
+Tên đăng nhập 3–40 ký tự, bắt đầu bằng chữ không dấu, có thể chứa số và . _ -; không trùng tài khoản khác.
+Mật khẩu 8–128 ký tự, chỉ lưu dạng băm và không hiển thị trong danh sách.
+Vai trò luôn là trainer, người tạo không thể dùng form này để tạo admin/lễ tân.
+Database mới không tự tạo hlv mặc định; tài khoản HLV cũ được giữ nguyên.
+HLV vừa tạo xuất hiện trong danh sách để hội viên chọn, cần xác nhận trước khi lập lịch.
+Admin/lễ tân không có nút Lịch tập hoặc Lập lịch; truy cập trực tiếp /plans và xóa lịch cũng bị chặn.

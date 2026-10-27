@@ -29,6 +29,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), max_days INTEGER);
         INSERT OR IGNORE INTO settings VALUES(1,6);
         ''')
+        if 'full_name' not in {r['name'] for r in c.execute('PRAGMA table_info(users)')}:
+            c.execute("ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''")
         if 'active' not in {r['name'] for r in c.execute('PRAGMA table_info(plans)')}:
             c.execute('ALTER TABLE plans ADD COLUMN active INTEGER NOT NULL DEFAULT 1')
         if 'auth_version' not in {r['name'] for r in c.execute('PRAGMA table_info(users)')}:
@@ -59,7 +61,7 @@ def init_db():
             c.execute('INSERT OR IGNORE INTO packages(months,price) VALUES(?,?)',(months,price))
         # Existing cashier accounts retain their password and now use reception permissions.
         c.execute("UPDATE users SET role='reception' WHERE role='cashier'")
-        for name,role in [('admin','admin'),('letan','reception'),('hlv','trainer')]:
+        for name,role in [('admin','admin'),('letan','reception')]:
             c.execute('INSERT OR IGNORE INTO users(username,password,role) VALUES(?,?,?)',(name,generate_password_hash(os.getenv('DEMO_PASSWORD','Gym@12345')),role))
         if not c.execute('SELECT 1 FROM exercises').fetchone():
             c.executemany('INSERT INTO exercises(name) VALUES(?)',[(x,) for x in ['Squat','Bench press','Deadlift','Chạy bộ']])
@@ -216,7 +218,7 @@ def account():
     if session['role'] != 'member': abort(403)
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
-        member = c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.user_id=? AND m.deleted_at IS NULL', (session['uid'],)).fetchone()
+        member = c.execute('SELECT m.*,(CASE WHEN length(u.full_name)>0 THEN u.full_name ELSE u.username END) trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.user_id=? AND m.deleted_at IS NULL', (session['uid'],)).fetchone()
         if not member: abort(403)
         if request.method == 'POST':
             if request.form.get('action') == 'trainer_request':
@@ -251,8 +253,8 @@ def account():
         active = c.execute('SELECT * FROM invoices WHERE member=? AND paid_at IS NOT NULL AND starts<=? AND expires>? ORDER BY expires DESC LIMIT 1',
                            (member['id'],date.today().isoformat(),date.today().isoformat())).fetchone()
         packages = c.execute('SELECT * FROM packages ORDER BY months').fetchall()
-        trainers = c.execute("SELECT id,username FROM users WHERE role='trainer' ORDER BY username").fetchall()
-        trainer_requests = c.execute('SELECT r.*,u.username trainer_name FROM trainer_requests r JOIN users u ON u.id=r.trainer WHERE r.member=? ORDER BY r.id DESC',(member['id'],)).fetchall()
+        trainers = c.execute("SELECT id,username,full_name FROM users WHERE role='trainer' ORDER BY username").fetchall()
+        trainer_requests = c.execute('SELECT r.*,(CASE WHEN length(u.full_name)>0 THEN u.full_name ELSE u.username END) trainer_name FROM trainer_requests r JOIN users u ON u.id=r.trainer WHERE r.member=? ORDER BY r.id DESC',(member['id'],)).fetchall()
         pending_request = next((r for r in trainer_requests if r['status']=='pending'),None)
     return render_template('account.html',member=member,invoices=invoices,plans=plans,active=active,packages=packages,
                            pending=any(not i['paid_at'] for i in invoices),trainers=trainers,trainer_requests=trainer_requests,pending_request=pending_request)
@@ -264,7 +266,7 @@ def cancel_trainer():
     if session['role'] != 'member': abort(403)
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
-        member = c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.user_id=? AND m.deleted_at IS NULL',(session['uid'],)).fetchone()
+        member = c.execute('SELECT m.*,(CASE WHEN length(u.full_name)>0 THEN u.full_name ELSE u.username END) trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.user_id=? AND m.deleted_at IS NULL',(session['uid'],)).fetchone()
         if not member: abort(403)
         accepted = c.execute("SELECT id FROM trainer_requests WHERE member=? AND trainer=? AND status='accepted' ORDER BY id DESC LIMIT 1",(member['id'],member['trainer'])).fetchone()
         if not member['trainer'] or not accepted:
@@ -343,6 +345,34 @@ def dashboard():
         totals=dict(c.execute('SELECT substr(paid_at,6,2),sum(amount) FROM invoices WHERE substr(paid_at,1,4)=? GROUP BY 1',(year,)).fetchall())
     return render_template('dashboard.html',members=members,active=active,revenue=revenue,year=year,counts=[counts.get(f'{i:02}',0) for i in range(1,13)],totals=[totals.get(f'{i:02}',0) for i in range(1,13)])
 
+@app.route('/trainers', methods=['GET','POST'])
+@require('reception')
+def manage_trainers():
+    if request.method == 'POST':
+        f = request.form
+        username = f.get('username','').strip().lower()
+        name = f.get('full_name','').strip()
+        password = f.get('password','')
+        if not re.fullmatch(r'[a-z][a-z0-9_.-]{2,39}',username):
+            flash('Tên đăng nhập cần 3–40 ký tự, bắt đầu bằng chữ và chỉ chứa chữ không dấu, số, dấu chấm, gạch dưới hoặc gạch ngang.')
+        elif not name or len(name)>120:
+            flash('Họ tên HLV cần từ 1 đến 120 ký tự.')
+        elif not 8<=len(password)<=128 or password!=f.get('confirm_password'):
+            flash('Mật khẩu cần 8–128 ký tự và khớp với phần nhập lại.')
+        else:
+            try:
+                with db() as c:
+                    c.execute('INSERT INTO users(username,password,role,full_name) VALUES(?,?,?,?)',
+                              (username,generate_password_hash(password),'trainer',name))
+                flash(f'Đã tạo tài khoản HLV {username}. HLV có thể đăng nhập và nhận yêu cầu của hội viên.')
+                return redirect('/trainers')
+            except sqlite3.IntegrityError:
+                flash('Tên đăng nhập đã tồn tại. Hãy chọn tên khác.')
+    with db() as c:
+        trainers = c.execute("SELECT id,username,full_name FROM users WHERE role='trainer' ORDER BY id DESC").fetchall()
+    return render_template('trainers.html',trainers=trainers)
+
+
 @app.route('/members',methods=['GET','POST'])
 @require('reception','trainer')
 def members():
@@ -352,7 +382,7 @@ def members():
             c.execute('BEGIN IMMEDIATE')
             flash(request_trainer(c,request.form.get('member',''),request.form.get('trainer','')))
             return redirect('/members')
-        query = "SELECT m.*,u.username trainer_name,r.id pending_request_id,pt.username pending_trainer FROM members m LEFT JOIN users u ON u.id=m.trainer LEFT JOIN trainer_requests r ON r.member=m.id AND r.status='pending' LEFT JOIN users pt ON pt.id=r.trainer WHERE m.deleted_at IS NULL"
+        query = "SELECT m.*,(CASE WHEN length(u.full_name)>0 THEN u.full_name ELSE u.username END) trainer_name,r.id pending_request_id,(CASE WHEN length(pt.full_name)>0 THEN pt.full_name ELSE pt.username END) pending_trainer FROM members m LEFT JOIN users u ON u.id=m.trainer LEFT JOIN trainer_requests r ON r.member=m.id AND r.status='pending' LEFT JOIN users pt ON pt.id=r.trainer WHERE m.deleted_at IS NULL"
         params = ()
         if session['role'] == 'trainer':
             query += " AND m.trainer=? AND EXISTS(SELECT 1 FROM trainer_requests confirmed WHERE confirmed.member=m.id AND confirmed.trainer=? AND confirmed.status='accepted')"
@@ -433,10 +463,11 @@ def payments():
 @app.route('/plans',methods=['GET','POST'])
 @require('trainer')
 def plans():
+    if session['role'] != 'trainer': abort(403)
     with db() as c:
         # Only accepted trainer requests authorize scheduling.
         if request.method == 'POST': c.execute('BEGIN IMMEDIATE')
-        query = "SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted')"
+        query = "SELECT m.*,(CASE WHEN length(u.full_name)>0 THEN u.full_name ELSE u.username END) trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted')"
         params = ()
         if session['role'] == 'trainer':
             query += ' AND m.trainer=?'
@@ -472,6 +503,7 @@ def plans():
 @app.post('/plans/<int:pid>/delete')
 @require('trainer')
 def delete_plan(pid):
+    if session['role'] != 'trainer': abort(403)
     with db() as c:
         c.execute("DELETE FROM plans WHERE id=? AND active=1 AND member IN (SELECT m.id FROM members m WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted') AND (m.trainer=? OR ?='admin'))",(pid,session['uid'],session['role']))
     return redirect('/plans')

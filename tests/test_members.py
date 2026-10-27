@@ -1,14 +1,17 @@
 import tempfile, unittest, sqlite3
 from pathlib import Path
 from unittest.mock import patch
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from index import app, init_db, db, confirmation as real_confirmation
 
 class MemberFlow(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory()
   app.config.update(TESTING=True,DATABASE=str(Path(self.tmp.name)/'test.db'))
-  init_db(); self.c=app.test_client()
+  init_db()
+  with db() as c:
+   c.execute("INSERT INTO users(username,password,role) VALUES(?,?,'trainer')",('hlv',generate_password_hash('Gym@12345')))
+  self.c=app.test_client()
   self.mail=patch('index.confirmation',return_value='SMTP test'); self.send=self.mail.start()
  def tearDown(self): self.mail.stop(); self.tmp.cleanup()
  def post(self,path,data,client=None):
@@ -72,9 +75,10 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(c.execute('SELECT count(*) FROM members').fetchone()[0],1)
    self.assertIsNone(c.execute('SELECT user_id FROM members').fetchone()[0])
   self.login('admin','Gym@12345')
-  for path in ['/','/members','/payments','/plans','/settings','/register']:
+  for path in ['/','/members','/payments','/settings','/register']:
    self.assertEqual(self.c.get(path).status_code,200)
   self.assertEqual(self.c.get('/account').status_code,403)
+  self.assertEqual(self.c.get('/plans').status_code,403)
 
  def test_delete_member_preserves_history_and_revokes_session(self):
   self.signup();self.login();self.post('/account',{'package':1})
@@ -414,5 +418,61 @@ class MemberFlow(unittest.TestCase):
   for name in ['OwnConfirmed','PeerConfirmed','UnassignedPerson','PendingPerson','CancelledPerson','PointerWithoutConsent']:
    self.assertIn(name,page)
   self.assertNotIn('DeletedPerson',page)
+
+ def test_staff_create_trainers_and_created_trainer_can_be_selected(self):
+  for staff_user,username in [('admin','HLV_Nam'),('letan','hlv_lan')]:
+   staff=app.test_client();self.login(staff_user,'Gym@12345',staff)
+   self.assertEqual(staff.get('/trainers').status_code,200)
+   self.assertIn('Quản lý HLV',staff.get('/').get_data(as_text=True))
+   self.assertEqual(staff.post('/trainers',data={}).status_code,400)
+   data=dict(full_name='Nguyen Trainer',username=username,password='Trainer12345',confirm_password='Trainer12345',role='admin')
+   self.assertEqual(self.post('/trainers',data,staff).status_code,302)
+   page=staff.get('/trainers').get_data(as_text=True)
+   self.assertIn(username.lower(),page);self.assertNotIn('Trainer12345',page)
+   self.assertEqual(self.post('/trainers',data,staff).status_code,200)
+   with db() as c:
+    u=c.execute('SELECT * FROM users WHERE username=?',(username.lower(),)).fetchone()
+    self.assertEqual(u['role'],'trainer');self.assertEqual(u['full_name'],'Nguyen Trainer')
+    self.assertTrue(check_password_hash(u['password'],'Trainer12345'));self.assertNotEqual(u['password'],'Trainer12345')
+   newtrainer=app.test_client();self.assertEqual(self.login(username,'Trainer12345',newtrainer).status_code,302)
+   self.assertEqual(newtrainer.get('/trainer-requests').status_code,200)
+   self.assertEqual(newtrainer.get('/trainers').status_code,403)
+  self.signup();self.login()
+  self.assertIn('Nguyen Trainer',self.c.get('/account').get_data(as_text=True))
+  self.assertEqual(self.post('/trainers',dict(username='hacker')).status_code,403)
+
+ def test_trainer_creation_validation_and_no_default_trainer(self):
+  with tempfile.TemporaryDirectory() as t:
+   original=app.config['DATABASE'];app.config['DATABASE']=str(Path(t)/'fresh.db')
+   try:
+    init_db()
+    with db() as c: self.assertEqual(c.execute("SELECT count(*) FROM users WHERE role='trainer'").fetchone()[0],0)
+   finally: app.config['DATABASE']=original
+  self.login('letan','Gym@12345')
+  base=dict(full_name='Trainer',username='new_hlv',password='Trainer12345',confirm_password='Trainer12345')
+  for override in [dict(username='admin'),dict(username='12phone'),dict(username='a'),dict(full_name=''),dict(password='short',confirm_password='short'),dict(confirm_password='different')]:
+   self.assertEqual(self.post('/trainers',{**base,**override}).status_code,200)
+  with db() as c: self.assertEqual(c.execute("SELECT count(*) FROM users WHERE role='trainer'").fetchone()[0],1)
+
+ def test_admin_and_reception_cannot_schedule_even_after_trainer_accepts(self):
+  self.signup();self.login()
+  with db() as c:
+   mid=c.execute('SELECT id FROM members').fetchone()[0]
+   trainer=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+  self.post('/account',dict(action='trainer_request',trainer=trainer))
+  with db() as c: rid=c.execute('SELECT id FROM trainer_requests').fetchone()[0]
+  hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
+  self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'},hlv)
+  data=dict(member=mid,exercise=1,sets=3,reps=15,days=['2'])
+  self.assertEqual(self.post('/plans',data,hlv).status_code,302)
+  with db() as c: pid=c.execute('SELECT id FROM plans').fetchone()[0]
+  for username in ['admin','letan']:
+   staff=app.test_client();self.login(username,'Gym@12345',staff)
+   self.assertEqual(staff.get('/plans').status_code,403)
+   self.assertEqual(self.post('/plans',data,staff).status_code,403)
+   self.assertEqual(self.post(f'/plans/{pid}/delete',{},staff).status_code,403)
+   page=staff.get('/members').get_data(as_text=True)
+   self.assertNotIn('href="/plans',page);self.assertNotIn('>Lập lịch<',page)
+  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM plans').fetchone()[0],1)
 
 if __name__=='__main__': unittest.main()
