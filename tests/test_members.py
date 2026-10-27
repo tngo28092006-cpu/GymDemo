@@ -162,4 +162,54 @@ class MemberFlow(unittest.TestCase):
   with oldclient.session_transaction() as session: session.update(uid=old['user_id'],role='member')
   self.assertEqual(oldclient.get('/account').status_code,302)
 
+ def test_member_password_change_and_old_sessions(self):
+  self.signup();self.signup(phone='0901234568',name='Other',email='b@example.com')
+  self.login();other_session=app.test_client();self.login(client=other_session)
+  url='/account/password'
+  self.assertEqual(self.c.get(url).status_code,200)
+  self.assertIn('Đổi mật khẩu',self.c.get('/account').get_data(as_text=True))
+  self.assertEqual(self.c.post(url,data={}).status_code,400)
+  for current,password,confirm in [('wrong','NewPass123','NewPass123'),('Member12345','short','short'),('Member12345','NewPass123','Mismatch'),('Member12345','Member12345','Member12345')]:
+   self.assertEqual(self.post(url,dict(current_password=current,password=password,confirm_password=confirm)).status_code,200)
+  self.assertTrue(self.post(url,dict(current_password='Member12345',password='NewPass123',confirm_password='NewPass123',user_id=999)).location.endswith('/login'))
+  self.assertEqual(other_session.get('/account').status_code,302)
+  self.assertEqual(self.login().status_code,200)
+  self.assertEqual(self.login(password='NewPass123').status_code,302)
+  self.assertEqual(self.login('0901234568').status_code,302)
+  with db() as c:
+   row=c.execute("SELECT u.* FROM users u JOIN members m ON m.user_id=u.id WHERE m.phone='0901234567'").fetchone()
+   self.assertNotEqual(row['password'],'NewPass123');self.assertTrue(check_password_hash(row['password'],'NewPass123'))
+   self.assertEqual(row['auth_version'],1)
+
+ def test_admin_resets_member_password_only(self):
+  self.signup();self.login();member_client=self.c
+  with db() as c: mid=c.execute('SELECT id FROM members').fetchone()[0]
+  url=f'/members/{mid}/password'
+  self.assertEqual(self.post(url,{}).status_code,403)
+  for user in ['letan','hlv','thungan']:
+   staff=app.test_client();self.login(user,'Gym@12345',staff)
+   self.assertEqual(staff.get(url).status_code,403)
+   self.assertEqual(self.post(url,{},staff).status_code,403)
+  admin=app.test_client();self.login('admin','Gym@12345',admin)
+  self.assertEqual(admin.get(url).status_code,200)
+  self.assertIn('Đặt lại mật khẩu',admin.get('/members').get_data(as_text=True))
+  self.assertEqual(admin.post(url,data={}).status_code,400)
+  data=dict(current_password='wrong',password='ResetPass123',confirm_password='ResetPass123')
+  self.assertEqual(self.post(url,data,admin).status_code,200)
+  data['current_password']='Gym@12345';data['confirm_password']='Mismatch'
+  self.assertEqual(self.post(url,data,admin).status_code,200)
+  data['confirm_password']='ResetPass123'
+  self.assertTrue(self.post(url,data,admin).location.endswith('/members'))
+  self.assertEqual(member_client.get('/account').status_code,302)
+  self.assertEqual(self.login().status_code,200)
+  self.assertEqual(self.login(password='ResetPass123').status_code,302)
+  self.assertEqual(admin.get('/members').status_code,200)
+  self.assertEqual(admin.get('/account/password').status_code,403)
+  self.assertEqual(admin.get('/members/99999/password').status_code,404)
+  self.post(f'/members/{mid}/delete',{'confirm':str(mid)},admin)
+  self.assertEqual(self.post(url,data,admin).status_code,404)
+  with db() as c:
+   legacy=c.execute("INSERT INTO members(name,phone) VALUES('No account','0900000000')").lastrowid
+  self.assertEqual(admin.get(f'/members/{legacy}/password').status_code,404)
+
 if __name__=='__main__': unittest.main()

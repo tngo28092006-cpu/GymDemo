@@ -71,7 +71,7 @@ Hồ sơ cũ không tự gắn tài khoản mới theo số điện thoại. N�
 Không xóa gym.db khi cập nhật. Sao lưu gym.db trước khi nâng cấp.
 Thống kê đăng ký hội viên tính theo ngày tạo hồ sơ tài khoản; doanh thu chỉ tính sau khi thu tiền.
 Email SMTP được gửi khi chọn gói thành công, không gửi khi mới tạo tài khoản.
-Chưa có xác minh email, quên mật khẩu hoặc giới hạn thử đăng nhập; chỉ dùng localhost demo.
+Chưa có xác minh email, tự khôi phục mật khẩu hoặc giới hạn thử đăng nhập; chỉ dùng localhost demo.
 
 Chạy kiểm tra: `python -m unittest discover -s tests -v`.
 
@@ -89,3 +89,13 @@ Chỉ hồ sơ chưa xóa giữ số điện thoại. Sau khi xóa, số đó đ
 Tài khoản mới có ID, mật khẩu và hồ sơ riêng; không xem được hóa đơn/lịch tập cũ.
 Lịch sử đã thu vẫn giữ ở hồ sơ cũ; tài khoản và phiên đăng nhập cũ vẫn bị khóa.
 Nếu số thuộc hồ sơ tại quầy chưa có tài khoản và chưa xóa, cần lễ tân hỗ trợ, không tự chiếm hồ sơ.
+
+## Đổi và đặt lại mật khẩu
+- Hội viên: Trang cá nhân > Đổi mật khẩu. Nhập mật khẩu hiện tại, mật khẩu mới và nhập lại.
+- Quản trị viên: Hội viên > Đặt lại mật khẩu (chỉ hồ sơ đang hoạt động có tài khoản).
+  Nhập mật khẩu quản trị viên để xác nhận, sau đó mật khẩu mới cho hội viên và nhập lại.
+- Mật khẩu mới có 8–128 ký tự, chỉ lưu dạng băm; không hiển thị hoặc gửi mật khẩu qua email.
+- Đổi/đặt lại mật khẩu tăng phiên bản xác thực; mọi phiên cũ bị chặn ở lần truy cập tiếp theo.
+  Hội viên tự đổi sẽ được đưa về đăng nhập ngay; quản trị viên giữ phiên hiện tại.
+- Hồ sơ tại quầy chưa có tài khoản hoặc hồ sơ đã xóa không được đặt lại mật khẩu.
+- Database tự thêm auth_version khi khởi động, giữ các tài khoản và dữ liệu cũ.

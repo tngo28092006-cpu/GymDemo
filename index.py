@@ -29,6 +29,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), max_days INTEGER);
         INSERT OR IGNORE INTO settings VALUES(1,6);
         ''')
+        if 'auth_version' not in {r['name'] for r in c.execute('PRAGMA table_info(users)')}:
+            c.execute('ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0')
         if 'deleted_at' not in {r['name'] for r in c.execute('PRAGMA table_info(members)')}:
             c.execute('ALTER TABLE members ADD COLUMN deleted_at TEXT')
         # Non-destructive migration: old members remain unlinked.
@@ -48,9 +50,9 @@ def require(*roles):
         def wrapped(*a,**kw):
             if not session.get('uid'): return redirect(url_for('login'))
             with db() as c:
-                user = c.execute('SELECT role FROM users WHERE id=?', (session['uid'],)).fetchone()
+                user = c.execute('SELECT role,auth_version FROM users WHERE id=?', (session['uid'],)).fetchone()
                 archived = c.execute('SELECT 1 FROM members WHERE user_id=? AND deleted_at IS NOT NULL', (session['uid'],)).fetchone()
-            if not user or archived:
+            if not user or archived or session.get('auth_version', 0) != user['auth_version']:
                 session.clear()
                 return redirect(url_for('login'))
             session['role'] = user['role']
@@ -114,7 +116,7 @@ def login():
             archived = c.execute('SELECT 1 FROM members WHERE user_id=? AND deleted_at IS NOT NULL', (u['id'],)).fetchone() if u else None
         if u and not archived and check_password_hash(u['password'],request.form['password']):
             session.clear()
-            session.update(uid=u['id'],role=u['role'],username=u['username'],csrf=secrets.token_hex(24))
+            session.update(uid=u['id'],role=u['role'],username=u['username'],auth_version=u['auth_version'],csrf=secrets.token_hex(24))
             return redirect('/account' if u['role']=='member' else '/')
         flash('Sai tài khoản hoặc mật khẩu.')
     return render_template('login.html')
@@ -213,6 +215,54 @@ def account():
         packages = c.execute('SELECT * FROM packages ORDER BY months').fetchall()
     return render_template('account.html',member=member,invoices=invoices,plans=plans,active=active,packages=packages,
                            pending=any(not i['paid_at'] for i in invoices))
+
+
+@app.route('/account/password', methods=['GET', 'POST'])
+@require('member')
+def change_password():
+    if session['role'] != 'member': abort(403)
+    if request.method == 'POST':
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            user = c.execute('SELECT * FROM users WHERE id=?', (session['uid'],)).fetchone()
+            f = request.form
+            password = f.get('password', '')
+            if not check_password_hash(user['password'], f.get('current_password', '')):
+                flash('Mật khẩu hiện tại không đúng.')
+            elif not 8 <= len(password) <= 128 or password != f.get('confirm_password'):
+                flash('Mật khẩu mới phải có 8–128 ký tự và khớp với phần nhập lại.')
+            elif check_password_hash(user['password'], password):
+                flash('Mật khẩu mới phải khác mật khẩu hiện tại.')
+            else:
+                c.execute('UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',
+                          (generate_password_hash(password), user['id']))
+                session.clear()
+                flash('Đổi mật khẩu thành công. Vui lòng đăng nhập lại bằng mật khẩu mới.')
+                return redirect('/login')
+    return render_template('password.html', member=None)
+
+
+@app.route('/members/<int:mid>/password', methods=['GET', 'POST'])
+@require('admin')
+def reset_member_password(mid):
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        member = c.execute("SELECT m.* FROM members m JOIN users u ON u.id=m.user_id WHERE m.id=? AND m.deleted_at IS NULL AND u.role='member'", (mid,)).fetchone()
+        if not member: abort(404)
+        if request.method == 'POST':
+            f = request.form
+            password = f.get('password', '')
+            admin = c.execute('SELECT password FROM users WHERE id=?', (session['uid'],)).fetchone()
+            if not check_password_hash(admin['password'], f.get('current_password', '')):
+                flash('Mật khẩu quản trị viên không đúng.')
+            elif not 8 <= len(password) <= 128 or password != f.get('confirm_password'):
+                flash('Mật khẩu mới phải có 8–128 ký tự và khớp với phần nhập lại.')
+            else:
+                c.execute('UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',
+                          (generate_password_hash(password), member['user_id']))
+                flash(f"Đã đặt lại mật khẩu cho hội viên #{mid}. Các phiên đăng nhập cũ đã bị đăng xuất.")
+                return redirect('/members')
+    return render_template('password.html', member=member)
 
 
 @app.get('/')
