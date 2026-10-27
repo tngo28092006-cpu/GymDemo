@@ -230,32 +230,101 @@ class MemberFlow(unittest.TestCase):
   with db() as c: self.assertIsNotNone(c.execute('SELECT paid_at FROM invoices').fetchone()[0])
   self.assertEqual(reception.get('/settings').status_code,403)
 
- def test_trainer_sees_unassigned_and_claims_on_valid_schedule(self):
-  self.signup();self.signup(email='b@example.com',phone='0901234568',name='Other trainer member')
+ def test_trainer_schedules_only_after_accepting_request(self):
+  self.signup();self.login()
   with db() as c:
-   mid=c.execute("SELECT id FROM members WHERE phone='0901234567'").fetchone()[0]
-   peer=c.execute("INSERT INTO users(username,password,role) SELECT 'hlv2',password,role FROM users WHERE username='hlv'").lastrowid
-   c.execute("UPDATE members SET trainer=? WHERE phone='0901234568'",(peer,))
-  self.login('hlv','Gym@12345')
-  page=self.c.get('/members').get_data(as_text=True)
-  self.assertIn('Hoi Vien A',page);self.assertIn('Lập lịch',page);self.assertNotIn('Đặt lại mật khẩu',page);self.assertNotIn('Xóa hội viên',page)
-  self.assertEqual(self.post('/members',dict(member=mid,trainer=peer)).status_code,403)
-  self.assertEqual(self.c.get(f'/plans?member={mid}').status_code,200)
-  data=dict(member=mid,exercise=1,sets=3,reps=15,days=[])
-  self.post('/plans',data)
-  with db() as c: self.assertIsNone(c.execute('SELECT trainer FROM members WHERE id=?',(mid,)).fetchone()[0])
-  data['days']=['2','4','6'];self.assertEqual(self.post('/plans',data).status_code,302)
+   mid=c.execute('SELECT id FROM members').fetchone()[0]
+   trainer=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+  self.post('/account',dict(action='trainer_request',trainer=trainer,member=999))
+  self.post('/account',dict(action='trainer_request',trainer=trainer))
+  with db() as c:
+   self.assertIsNone(c.execute('SELECT trainer FROM members').fetchone()[0])
+   self.assertEqual(c.execute('SELECT count(*) FROM trainer_requests').fetchone()[0],1)
+   rid=c.execute('SELECT id FROM trainer_requests').fetchone()[0]
+  hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
+  self.assertIn('Hoi Vien A',hlv.get('/members').get_data(as_text=True))
+  self.assertIn('Xác nhận làm HLV',hlv.get('/trainer-requests').get_data(as_text=True))
+  data=dict(member=mid,exercise=1,sets=3,reps=15,days=['2','4','6'])
+  self.post('/plans',data,hlv)
+  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM plans').fetchone()[0],0)
+  self.assertEqual(hlv.post(f'/trainer-requests/{rid}/respond',data={'decision':'accept'}).status_code,400)
+  self.assertEqual(self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'},hlv).status_code,302)
+  self.assertEqual(self.post('/plans',data,hlv).status_code,302)
+  self.post(f'/trainer-requests/{rid}/respond',{'decision':'reject'},hlv)
+  with db() as c:
+   self.assertEqual(c.execute('SELECT trainer FROM members').fetchone()[0],trainer)
+   self.assertEqual(c.execute('SELECT status FROM trainer_requests').fetchone()[0],'accepted')
+   self.assertEqual(c.execute('SELECT count(*) FROM plans').fetchone()[0],1)
+  self.assertIn('Squat',self.c.get('/account').get_data(as_text=True))
+  self.assertIn('Đã được hlv xác nhận',self.c.get('/account').get_data(as_text=True))
+
+ def test_cancel_reject_and_request_ownership(self):
+  self.signup();self.login()
   with db() as c:
    trainer=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
-   self.assertEqual(c.execute('SELECT trainer FROM members WHERE id=?',(mid,)).fetchone()[0],trainer)
-   pid=c.execute('SELECT id FROM plans WHERE member=?',(mid,)).fetchone()[0]
-  self.post('/logout',{});self.login('hlv2','Gym@12345')
-  self.assertEqual(self.post('/plans',data).status_code,403)
-  self.post(f'/plans/{pid}/delete',{})
-  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM plans WHERE id=?',(pid,)).fetchone()[0],1)
-  self.assertEqual(self.c.get('/payments').status_code,403)
-  self.assertEqual(self.c.get(f'/members/{mid}/password').status_code,403)
-  self.assertEqual(self.post(f'/members/{mid}/delete',{'confirm':str(mid)}).status_code,403)
+   peer=c.execute("INSERT INTO users(username,password,role) SELECT 'hlv2',password,role FROM users WHERE username='hlv'").lastrowid
+  self.post('/account',dict(action='trainer_request',trainer=1))  # admin is not a trainer
+  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM trainer_requests').fetchone()[0],0)
+  self.post('/account',dict(action='trainer_request',trainer=trainer))
+  with db() as c: rid=c.execute('SELECT id FROM trainer_requests').fetchone()[0]
+  peerclient=app.test_client();self.login('hlv2','Gym@12345',peerclient)
+  self.assertEqual(self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'},peerclient).status_code,403)
+  other=app.test_client()
+  self.post('/logout',{});self.signup(phone='0901234568',email='b@example.com');self.login('0901234568',client=other)
+  self.post('/account',dict(action='cancel_trainer_request',request_id=rid),other)
+  with db() as c: self.assertEqual(c.execute('SELECT status FROM trainer_requests WHERE id=?',(rid,)).fetchone()[0],'pending')
+  self.login();self.post('/account',dict(action='cancel_trainer_request',request_id=rid))
+  hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
+  self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'},hlv)
+  with db() as c: self.assertIsNone(c.execute("SELECT trainer FROM members WHERE phone='0901234567'").fetchone()[0])
+  self.post('/account',dict(action='trainer_request',trainer=trainer))
+  with db() as c: rid=c.execute('SELECT max(id) FROM trainer_requests').fetchone()[0]
+  self.post(f'/trainer-requests/{rid}/respond',{'decision':'reject'},hlv)
+  self.post('/account',dict(action='trainer_request',trainer=peer))
+  with db() as c:
+   self.assertEqual(c.execute("SELECT trainer FROM trainer_requests WHERE status='pending'").fetchone()[0],peer)
+  self.assertEqual(self.c.get('/trainer-requests').status_code,403)
+
+ def test_staff_request_does_not_bypass_confirmation(self):
+  self.signup();self.login()
+  with db() as c:
+   mid=c.execute('SELECT id FROM members').fetchone()[0]
+   trainer=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+  reception=app.test_client();self.login('letan','Gym@12345',reception)
+  self.post('/members',dict(member=mid,trainer=trainer),reception)
+  admin=app.test_client();self.login('admin','Gym@12345',admin)
+  self.post('/plans',dict(member=mid,exercise=1,sets=3,reps=15,days=['2']),admin)
+  with db() as c:
+   self.assertIsNone(c.execute('SELECT trainer FROM members').fetchone()[0])
+   self.assertEqual(c.execute('SELECT count(*) FROM plans').fetchone()[0],0)
+   rid=c.execute('SELECT id FROM trainer_requests').fetchone()[0]
+  self.assertEqual(self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'},admin).status_code,403)
+  self.post(f'/members/{mid}/delete',{'confirm':str(mid)},reception)
+  hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
+  self.assertEqual(self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'},hlv).status_code,404)
+  with db() as c: self.assertEqual(c.execute('SELECT status FROM trainer_requests').fetchone()[0],'cancelled')
+
+ def test_existing_assignment_requires_confirmation_after_migration(self):
+  self.signup()
+  with db() as c:
+   trainer=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+   c.execute('UPDATE members SET trainer=?',(trainer,))
+   c.execute("DELETE FROM app_migrations WHERE name='trainer-consent-v1'")
+   c.execute("INSERT INTO plans(member,exercise,sets,reps,days) VALUES(1,1,3,15,'2')")
+  init_db();init_db()
+  with db() as c:
+   self.assertIsNone(c.execute('SELECT trainer FROM members').fetchone()[0])
+   self.assertEqual(c.execute('SELECT count(*) FROM trainer_requests').fetchone()[0],1)
+   self.assertEqual(c.execute('SELECT count(*) FROM plans').fetchone()[0],1)
+   rid=c.execute('SELECT id FROM trainer_requests').fetchone()[0]
+  self.login('hlv','Gym@12345')
+  self.post(f'/plans/1/delete',{})
+  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM plans').fetchone()[0],1)
+  self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'})
+  init_db()
+  with db() as c:
+   self.assertEqual(c.execute('SELECT trainer FROM members').fetchone()[0],trainer)
+   self.assertEqual(c.execute('SELECT count(*) FROM trainer_requests').fetchone()[0],1)
 
  def test_cashier_role_migrates_without_password_change(self):
   with db() as c:

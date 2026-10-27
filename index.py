@@ -37,6 +37,22 @@ def init_db():
         if 'user_id' not in {r['name'] for r in c.execute('PRAGMA table_info(members)')}:
             c.execute('ALTER TABLE members ADD COLUMN user_id INTEGER REFERENCES users(id)')
         c.execute('CREATE UNIQUE INDEX IF NOT EXISTS members_user_id ON members(user_id)')
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS trainer_requests(
+            id INTEGER PRIMARY KEY, member INTEGER NOT NULL REFERENCES members(id),
+            trainer INTEGER NOT NULL REFERENCES users(id),
+            status TEXT NOT NULL CHECK(status IN ('pending','accepted','rejected','cancelled')),
+            created TEXT NOT NULL, responded TEXT);
+        CREATE UNIQUE INDEX IF NOT EXISTS one_pending_trainer_request
+            ON trainer_requests(member) WHERE status='pending';
+        CREATE TABLE IF NOT EXISTS app_migrations(name TEXT PRIMARY KEY);
+        """)
+        c.execute('BEGIN IMMEDIATE')
+        if not c.execute("SELECT 1 FROM app_migrations WHERE name='trainer-consent-v1'").fetchone():
+            # Existing assignments must be confirmed by the selected trainer as well.
+            c.execute("INSERT INTO trainer_requests(member,trainer,status,created) SELECT m.id,m.trainer,'pending',? FROM members m JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL AND u.role='trainer'", (datetime.now().isoformat(),))
+            c.execute('UPDATE members SET trainer=NULL WHERE deleted_at IS NULL')
+            c.execute("INSERT INTO app_migrations VALUES('trainer-consent-v1')")
         for months, price in [(1,500000),(3,1200000),(6,2000000),(12,3500000)]:
             c.execute('INSERT OR IGNORE INTO packages(months,price) VALUES(?,?)',(months,price))
         # Existing cashier accounts retain their password and now use reception permissions.
@@ -86,6 +102,17 @@ def normalize_phone(value):
 def valid_email(email):
     return not email or (len(email) <= 254 and re.fullmatch(
         r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", email) is not None)
+
+
+def request_trainer(c, member_id, trainer_id):
+    member = c.execute('SELECT * FROM members WHERE id=? AND deleted_at IS NULL', (member_id,)).fetchone()
+    trainer = c.execute("SELECT id FROM users WHERE id=? AND role='trainer'", (trainer_id,)).fetchone()
+    if not member or not trainer: return 'Hội viên hoặc HLV không hợp lệ.'
+    if member['trainer'] is not None: return 'Bạn đã có HLV được xác nhận.'
+    if c.execute("SELECT 1 FROM trainer_requests WHERE member=? AND status='pending'", (member_id,)).fetchone():
+        return 'Đã có yêu cầu chờ xác nhận. Hủy yêu cầu cũ trước khi chọn lại.'
+    c.execute("INSERT INTO trainer_requests(member,trainer,status,created) VALUES(?,?,'pending',?)", (member_id,trainer_id,datetime.now().isoformat()))
+    return 'Đã gửi yêu cầu. HLV cần xác nhận trước khi lập lịch cho bạn.'
 
 
 def confirmation(email,name):
@@ -190,6 +217,13 @@ def account():
         member = c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.user_id=? AND m.deleted_at IS NULL', (session['uid'],)).fetchone()
         if not member: abort(403)
         if request.method == 'POST':
+            if request.form.get('action') == 'trainer_request':
+                flash(request_trainer(c,member['id'],request.form.get('trainer','')))
+                return redirect('/account')
+            if request.form.get('action') == 'cancel_trainer_request':
+                changed = c.execute("UPDATE trainer_requests SET status='cancelled',responded=? WHERE id=? AND member=? AND status='pending'", (datetime.now().isoformat(),request.form.get('request_id',''),member['id'])).rowcount
+                flash('Đã hủy yêu cầu HLV.' if changed else 'Yêu cầu không còn ở trạng thái chờ.')
+                return redirect('/account')
             if request.form.get('action') == 'email':
                 email = request.form.get('email', '').strip().lower()
                 if not valid_email(email):
@@ -215,8 +249,11 @@ def account():
         active = c.execute('SELECT * FROM invoices WHERE member=? AND paid_at IS NOT NULL AND starts<=? AND expires>? ORDER BY expires DESC LIMIT 1',
                            (member['id'],date.today().isoformat(),date.today().isoformat())).fetchone()
         packages = c.execute('SELECT * FROM packages ORDER BY months').fetchall()
+        trainers = c.execute("SELECT id,username FROM users WHERE role='trainer' ORDER BY username").fetchall()
+        trainer_requests = c.execute('SELECT r.*,u.username trainer_name FROM trainer_requests r JOIN users u ON u.id=r.trainer WHERE r.member=? ORDER BY r.id DESC',(member['id'],)).fetchall()
+        pending_request = next((r for r in trainer_requests if r['status']=='pending'),None)
     return render_template('account.html',member=member,invoices=invoices,plans=plans,active=active,packages=packages,
-                           pending=any(not i['paid_at'] for i in invoices))
+                           pending=any(not i['paid_at'] for i in invoices),trainers=trainers,trainer_requests=trainer_requests,pending_request=pending_request)
 
 
 @app.route('/account/password', methods=['GET', 'POST'])
@@ -284,14 +321,47 @@ def dashboard():
 @require('reception','trainer')
 def members():
     with db() as c:
-        if request.method=='POST':
+        if request.method == 'POST':
             if session['role'] not in ['admin','reception']: abort(403)
-            trainer=request.form.get('trainer') or None
-            if trainer and not c.execute("SELECT 1 FROM users WHERE id=? AND role='trainer'",(trainer,)).fetchone(): abort(400)
-            c.execute('UPDATE members SET trainer=? WHERE id=? AND deleted_at IS NULL',(trainer,request.form['member'])); flash('Đã cập nhật huấn luyện viên.')
-        rows=c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL ORDER BY m.id DESC').fetchall()
-        trainers=c.execute("SELECT * FROM users WHERE role='trainer'").fetchall()
+            c.execute('BEGIN IMMEDIATE')
+            flash(request_trainer(c,request.form.get('member',''),request.form.get('trainer','')))
+            return redirect('/members')
+        rows = c.execute("SELECT m.*,u.username trainer_name,r.id pending_request_id,pt.username pending_trainer FROM members m LEFT JOIN users u ON u.id=m.trainer LEFT JOIN trainer_requests r ON r.member=m.id AND r.status='pending' LEFT JOIN users pt ON pt.id=r.trainer WHERE m.deleted_at IS NULL ORDER BY m.id DESC").fetchall()
+        trainers = c.execute("SELECT * FROM users WHERE role='trainer'").fetchall()
     return render_template('members.html',rows=rows,trainers=trainers)
+
+
+@app.get('/trainer-requests')
+@require('trainer')
+def trainer_requests():
+    if session['role'] != 'trainer': abort(403)
+    with db() as c:
+        rows = c.execute("SELECT r.*,m.name,m.phone FROM trainer_requests r JOIN members m ON m.id=r.member WHERE r.trainer=? AND m.deleted_at IS NULL ORDER BY CASE WHEN r.status='pending' THEN 0 ELSE 1 END,r.id DESC", (session['uid'],)).fetchall()
+    return render_template('trainer_requests.html',rows=rows)
+
+
+@app.post('/trainer-requests/<int:rid>/respond')
+@require('trainer')
+def respond_trainer_request(rid):
+    if session['role'] != 'trainer': abort(403)
+    decision = request.form.get('decision')
+    if decision not in ['accept','reject']: abort(400)
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        item = c.execute('SELECT r.*,m.deleted_at,m.trainer current_trainer FROM trainer_requests r JOIN members m ON m.id=r.member WHERE r.id=?',(rid,)).fetchone()
+        if not item or item['deleted_at']: abort(404)
+        if item['trainer'] != session['uid']: abort(403)
+        if item['status'] != 'pending':
+            flash('Yêu cầu đã được xử lý hoặc hủy.')
+        elif item['current_trainer'] is not None:
+            flash('Hội viên đã có HLV. Không thể xác nhận yêu cầu này.')
+        else:
+            status = 'accepted' if decision=='accept' else 'rejected'
+            c.execute('UPDATE trainer_requests SET status=?,responded=? WHERE id=?',(status,datetime.now().isoformat(),rid))
+            if decision == 'accept':
+                c.execute('UPDATE members SET trainer=? WHERE id=?',(session['uid'],item['member']))
+            flash('Đã xác nhận. Bạn có thể lập lịch cho hội viên.' if decision=='accept' else 'Đã từ chối yêu cầu.')
+    return redirect('/trainer-requests')
 
 
 @app.route('/members/<int:mid>/delete', methods=['GET', 'POST'])
@@ -306,6 +376,7 @@ def delete_member(mid):
                 flash('Nhập đúng mã hội viên để xác nhận xóa.')
             else:
                 c.execute('UPDATE members SET deleted_at=? WHERE id=?', (datetime.now().isoformat(), mid))
+                c.execute("UPDATE trainer_requests SET status='cancelled',responded=? WHERE member=? AND status='pending'", (datetime.now().isoformat(),mid))
                 flash('Đã xóa hội viên khỏi danh sách và khóa đăng nhập. Lịch sử thanh toán được giữ lại.')
                 return redirect('/members')
     return render_template('delete_member.html', member=member)
@@ -332,9 +403,9 @@ def payments():
 @require('trainer')
 def plans():
     with db() as c:
-        # Serialize claiming an unassigned member with plan creation.
+        # Only accepted trainer requests authorize scheduling.
         if request.method == 'POST': c.execute('BEGIN IMMEDIATE')
-        available = c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL ORDER BY m.name,m.id').fetchall()
+        available = c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status=\'accepted\') ORDER BY m.name,m.id').fetchall()
         limit = c.execute('SELECT max_days FROM settings').fetchone()[0]
         if request.method == 'POST':
             try:
@@ -343,7 +414,7 @@ def plans():
                 sets = int(request.form['sets']); reps = int(request.form['reps']); eid = int(request.form['exercise'])
                 member = next((m for m in available if m['id'] == mid), None)
                 if not member: raise ValueError()
-                if session['role'] != 'admin' and member['trainer'] not in (None, session['uid']):
+                if session['role'] != 'admin' and member['trainer'] != session['uid']:
                     abort(403)
                 existing = set()
                 for row in c.execute('SELECT days FROM plans WHERE member=?', (mid,)):
@@ -352,23 +423,21 @@ def plans():
                     or not 1<=sets<=100 or not 1<=reps<=1000
                     or not c.execute('SELECT 1 FROM exercises WHERE id=? AND active=1',(eid,)).fetchone()):
                     raise ValueError()
-                if member['trainer'] is None and session['role'] == 'trainer':
-                    c.execute('UPDATE members SET trainer=? WHERE id=? AND trainer IS NULL', (session['uid'],mid))
                 c.execute('INSERT INTO plans(member,exercise,sets,reps,days) VALUES(?,?,?,?,?)',(mid,eid,sets,reps,','.join(days)))
-                flash('Đã thêm bài tập và phân công hội viên cho bạn nếu chưa có HLV.')
+                flash('Đã thêm bài tập cho hội viên đã được HLV xác nhận.')
                 return redirect(url_for('plans', member=mid))
             except (ValueError,KeyError):
                 flash(f'Thông tin không hợp lệ. Chọn hội viên, bài tập và từ 1 đến {limit} ngày tập/tuần.')
-        rows = c.execute("SELECT p.*,m.name,e.name exercise_name FROM plans p JOIN members m ON m.id=p.member JOIN exercises e ON e.id=p.exercise WHERE m.deleted_at IS NULL AND (m.trainer=? OR ?='admin')",(session['uid'],session['role'])).fetchall()
+        rows = c.execute("SELECT p.*,m.name,e.name exercise_name FROM plans p JOIN members m ON m.id=p.member JOIN exercises e ON e.id=p.exercise WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted') AND (m.trainer=? OR ?='admin')",(session['uid'],session['role'])).fetchall()
         exercises = c.execute('SELECT * FROM exercises WHERE active=1').fetchall()
-        can_schedule = any(session['role']=='admin' or m['trainer'] in (None,session['uid']) for m in available)
+        can_schedule = any(session['role']=='admin' or m['trainer']==session['uid'] for m in available)
     return render_template('plans.html',rows=rows,members=available,exercises=exercises,limit=limit,can_schedule=can_schedule,selected_member=request.args.get('member', type=int))
 
 @app.post('/plans/<int:pid>/delete')
 @require('trainer')
 def delete_plan(pid):
     with db() as c:
-        c.execute("DELETE FROM plans WHERE id=? AND member IN (SELECT id FROM members WHERE deleted_at IS NULL AND (trainer=? OR ?='admin'))",(pid,session['uid'],session['role']))
+        c.execute("DELETE FROM plans WHERE id=? AND member IN (SELECT m.id FROM members m WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted') AND (m.trainer=? OR ?='admin'))",(pid,session['uid'],session['role']))
     return redirect('/plans')
 
 @app.route('/settings',methods=['GET','POST'])

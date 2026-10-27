@@ -12,16 +12,16 @@ SQLite gym.db tự tạo khi chạy index.py lần đầu. Khởi động lại 
 ## Tài khoản mẫu
 Mật khẩu chung ban đầu: Gym@12345
 - admin: toàn quyền
-- letan: quản lý hội viên, gán HLV, thu tiền và đặt lại mật khẩu hội viên
-- hlv: xem danh sách hội viên, nhận hội viên chưa có HLV và lập/xóa lịch được phân công
+- letan: quản lý hội viên, gửi yêu cầu HLV, thu tiền và đặt lại mật khẩu hội viên
+- hlv: xem danh sách hội viên, xác nhận yêu cầu hội viên và lập/xóa lịch được phân công
 Đăng ký tài khoản trực tuyến: http://127.0.0.1:5000/signup.
 Có thể đặt biến môi trường DEMO_PASSWORD trước lần chạy đầu để đổi mật khẩu khởi tạo.
 
 ## Kịch bản chạy thử
 1. Tạo tài khoản tại /signup, đăng nhập rồi chọn gói tại /account.
-2. Đăng nhập admin hoặc letan, vào Hội viên, gán HLV hlv.
+2. Hội viên vào Trang cá nhân, chọn hlv và gửi yêu cầu đăng ký HLV.
 3. Đăng nhập admin hoặc letan, vào Thanh toán, xác nhận đã thu tiền.
-4. Đăng nhập hlv, tạo Squat, 3 hiệp, 15 lần, Thứ 2/4/6.
+4. Đăng nhập hlv, vào Yêu cầu HLV và xác nhận, sau đó tạo Squat, 3 hiệp, 15 lần, Thứ 2/4/6.
 5. Xem Tổng quan: hội viên còn hạn, đăng ký và doanh thu theo tháng trong năm hiện tại.
 6. Admin vào Quy định để đổi giá, thêm/sửa/xóa bài tập và giới hạn ngày tập.
 
@@ -103,8 +103,17 @@ Nếu số thuộc hồ sơ tại quầy chưa có tài khoản và chưa xóa, 
 Chỉ còn vai trò admin, reception (lễ tân kiêm thu ngân), trainer và member.
 Không tạo tài khoản thungan cho database mới; tài khoản cashier cũ được chuyển sang reception, giữ mật khẩu.
 Lễ tân có Thanh toán, Xóa hội viên và Đặt lại mật khẩu (xác nhận bằng mật khẩu của chính lễ tân).
-HLV có trang Hội viên chỉ đọc. Chọn Lập lịch để vào lịch của hội viên được chọn.
-HLV thấy hội viên chưa phân công và của mình; danh sách chọn cũng ghi rõ người đang thuộc HLV khác.
-Khi HLV tạo lịch đầu tiên cho người chưa phân công, hệ thống tự gán người đó cho HLV đang đăng nhập.
-HLV không được thay phân công, xóa hội viên, thu tiền hay đặt lại mật khẩu.
-Hội viên thuộc HLV khác cần lễ tân/admin đổi phân công trước; admin có thể lập lịch cho mọi hội viên.
+HLV có trang Hội viên chỉ đọc và mục Yêu cầu HLV để xác nhận hoặc từ chối.
+
+## Hội viên chọn HLV và HLV xác nhận
+1. Hội viên đăng nhập > Trang cá nhân > Đăng ký huấn luyện viên > chọn HLV > Gửi yêu cầu.
+2. HLV đăng nhập > Yêu cầu HLV > Xác nhận làm HLV hoặc Từ chối.
+3. Chỉ sau khi xác nhận, HLV mới được tạo/xóa lịch cho hội viên đó.
+- Hội viên có thể hủy yêu cầu đang chờ để chọn HLV khác. Mỗi người chỉ có một yêu cầu chờ.
+- Khi đã được nhận, không tạo yêu cầu mới hoặc đổi HLV qua giao diện hiện tại.
+- Lễ tân/admin có thể gửi yêu cầu hỗ trợ tại quầy, không thể bỏ qua xác nhận của HLV.
+- Không còn tự phân công khi tạo lịch; cả admin cũng không tạo lịch trước xác nhận.
+- Chỉ HLV được chọn mới xử lý yêu cầu đó. Yêu cầu đã xử lý/hủy không được xử lý lại.
+- Xóa hội viên hủy yêu cầu chờ; giữ lịch sử đã có.
+- Nâng cấp lần đầu: phân công cũ chuyển thành yêu cầu chờ HLV xác nhận; giữ lịch tập/hóa đơn cũ.
+  Chạy lại không tạo trùng hay đặt lại yêu cầu đã được chấp nhận.
