@@ -29,6 +29,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), max_days INTEGER);
         INSERT OR IGNORE INTO settings VALUES(1,6);
         ''')
+        if 'deleted_at' not in {r['name'] for r in c.execute('PRAGMA table_info(members)')}:
+            c.execute('ALTER TABLE members ADD COLUMN deleted_at TEXT')
         # Non-destructive migration: old members remain unlinked.
         if 'user_id' not in {r['name'] for r in c.execute('PRAGMA table_info(members)')}:
             c.execute('ALTER TABLE members ADD COLUMN user_id INTEGER REFERENCES users(id)')
@@ -45,6 +47,13 @@ def require(*roles):
         @wraps(f)
         def wrapped(*a,**kw):
             if not session.get('uid'): return redirect(url_for('login'))
+            with db() as c:
+                user = c.execute('SELECT role FROM users WHERE id=?', (session['uid'],)).fetchone()
+                archived = c.execute('SELECT 1 FROM members WHERE user_id=? AND deleted_at IS NOT NULL', (session['uid'],)).fetchone()
+            if not user or archived:
+                session.clear()
+                return redirect(url_for('login'))
+            session['role'] = user['role']
             if roles and session['role'] not in roles and session['role']!='admin': abort(403)
             return f(*a,**kw)
         return wrapped
@@ -80,7 +89,9 @@ def confirmation(email,name):
 def login():
     if request.method=='POST':
         with db() as c: u=c.execute('SELECT * FROM users WHERE username=?',(request.form['username'].strip().lower(),)).fetchone()
-        if u and check_password_hash(u['password'],request.form['password']):
+        with db() as c:
+            archived = c.execute('SELECT 1 FROM members WHERE user_id=? AND deleted_at IS NOT NULL', (u['id'],)).fetchone() if u else None
+        if u and not archived and check_password_hash(u['password'],request.form['password']):
             session.clear()
             session.update(uid=u['id'],role=u['role'],username=u['username'],csrf=secrets.token_hex(24))
             return redirect('/account' if u['role']=='member' else '/')
@@ -152,7 +163,7 @@ def account():
     if session['role'] != 'member': abort(403)
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
-        member = c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.user_id=?', (session['uid'],)).fetchone()
+        member = c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.user_id=? AND m.deleted_at IS NULL', (session['uid'],)).fetchone()
         if not member: abort(403)
         if request.method == 'POST':
             package = c.execute('SELECT * FROM packages WHERE id=?', (request.form.get('package',''),)).fetchone()
@@ -181,11 +192,11 @@ def account():
 def dashboard():
     if session['role']=='member': return redirect('/account')
     with db() as c:
-        members=c.execute('SELECT count(*) FROM members').fetchone()[0]
-        active=c.execute('SELECT count(DISTINCT member) FROM invoices WHERE paid_at IS NOT NULL AND starts<=? AND expires>?',(date.today().isoformat(),date.today().isoformat())).fetchone()[0]
+        members=c.execute('SELECT count(*) FROM members WHERE deleted_at IS NULL').fetchone()[0]
+        active=c.execute('SELECT count(DISTINCT member) FROM invoices WHERE paid_at IS NOT NULL AND starts<=? AND expires>? AND member IN (SELECT id FROM members WHERE deleted_at IS NULL)',(date.today().isoformat(),date.today().isoformat())).fetchone()[0]
         revenue=c.execute('SELECT coalesce(sum(amount),0) FROM invoices WHERE substr(paid_at,1,7)=?',(date.today().isoformat()[:7],)).fetchone()[0]
         year=str(date.today().year)
-        counts=dict(c.execute('SELECT substr(registered,6,2),count(*) FROM members WHERE substr(registered,1,4)=? GROUP BY 1',(year,)).fetchall())
+        counts=dict(c.execute('SELECT substr(registered,6,2),count(*) FROM members WHERE deleted_at IS NULL AND substr(registered,1,4)=? GROUP BY 1',(year,)).fetchall())
         totals=dict(c.execute('SELECT substr(paid_at,6,2),sum(amount) FROM invoices WHERE substr(paid_at,1,4)=? GROUP BY 1',(year,)).fetchall())
     return render_template('dashboard.html',members=members,active=active,revenue=revenue,year=year,counts=[counts.get(f'{i:02}',0) for i in range(1,13)],totals=[totals.get(f'{i:02}',0) for i in range(1,13)])
 
@@ -196,10 +207,27 @@ def members():
         if request.method=='POST':
             trainer=request.form.get('trainer') or None
             if trainer and not c.execute("SELECT 1 FROM users WHERE id=? AND role='trainer'",(trainer,)).fetchone(): abort(400)
-            c.execute('UPDATE members SET trainer=? WHERE id=?',(trainer,request.form['member'])); flash('Đã cập nhật huấn luyện viên.')
-        rows=c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer ORDER BY m.id DESC').fetchall()
+            c.execute('UPDATE members SET trainer=? WHERE id=? AND deleted_at IS NULL',(trainer,request.form['member'])); flash('Đã cập nhật huấn luyện viên.')
+        rows=c.execute('SELECT m.*,u.username trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL ORDER BY m.id DESC').fetchall()
         trainers=c.execute("SELECT * FROM users WHERE role='trainer'").fetchall()
     return render_template('members.html',rows=rows,trainers=trainers)
+
+
+@app.route('/members/<int:mid>/delete', methods=['GET', 'POST'])
+@require('reception')
+def delete_member(mid):
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        member = c.execute('SELECT * FROM members WHERE id=? AND deleted_at IS NULL', (mid,)).fetchone()
+        if not member: abort(404)
+        if request.method == 'POST':
+            if request.form.get('confirm') != str(mid):
+                flash('Nhập đúng mã hội viên để xác nhận xóa.')
+            else:
+                c.execute('UPDATE members SET deleted_at=? WHERE id=?', (datetime.now().isoformat(), mid))
+                flash('Đã xóa hội viên khỏi danh sách và khóa đăng nhập. Lịch sử thanh toán được giữ lại.')
+                return redirect('/members')
+    return render_template('delete_member.html', member=member)
 
 @app.route('/payments',methods=['GET','POST'])
 @require('cashier')
@@ -209,6 +237,9 @@ def payments():
             c.execute('BEGIN IMMEDIATE')
             inv=c.execute('SELECT * FROM invoices WHERE id=?',(request.form['invoice'],)).fetchone()
             if not inv: abort(404)
+            if c.execute('SELECT 1 FROM members WHERE id=? AND deleted_at IS NOT NULL',(inv['member'],)).fetchone():
+                flash('Hội viên đã bị xóa. Không thể thu thêm tiền.')
+                return redirect('/payments')
             if not inv['paid_at']:
                 d=date.today(); last=c.execute('SELECT max(expires) FROM invoices WHERE member=? AND paid_at IS NOT NULL',(inv['member'],)).fetchone()[0]
                 start=max(d,date.fromisoformat(last)) if last else d
@@ -220,7 +251,7 @@ def payments():
 @require('trainer')
 def plans():
     with db() as c:
-        allowed=c.execute('SELECT * FROM members WHERE trainer=? OR ?=\'admin\'',(session['uid'],session['role'])).fetchall()
+        allowed=c.execute('SELECT * FROM members WHERE deleted_at IS NULL AND (trainer=? OR ?=\'admin\')',(session['uid'],session['role'])).fetchall()
         limit=c.execute('SELECT max_days FROM settings').fetchone()[0]
         if request.method=='POST':
             try:
@@ -230,7 +261,7 @@ def plans():
                 if mid not in [m['id'] for m in allowed] or not days or not set(days)<=set('2345678') or len(existing|set(days))>limit or not 1<=sets<=100 or not 1<=reps<=1000 or not c.execute('SELECT 1 FROM exercises WHERE id=? AND active=1',(eid,)).fetchone(): raise ValueError()
                 c.execute('INSERT INTO plans(member,exercise,sets,reps,days) VALUES(?,?,?,?,?)',(mid,eid,sets,reps,','.join(days))); flash('Đã thêm bài tập.')
             except (ValueError,KeyError): flash(f'Không hợp lệ: tổng số ngày tập của hội viên phải tối đa {limit} ngày/tuần.')
-        rows=c.execute("SELECT p.*,m.name,e.name exercise_name FROM plans p JOIN members m ON m.id=p.member JOIN exercises e ON e.id=p.exercise WHERE m.trainer=? OR ?='admin'",(session['uid'],session['role'])).fetchall()
+        rows=c.execute("SELECT p.*,m.name,e.name exercise_name FROM plans p JOIN members m ON m.id=p.member JOIN exercises e ON e.id=p.exercise WHERE m.deleted_at IS NULL AND (m.trainer=? OR ?='admin')",(session['uid'],session['role'])).fetchall()
         exercises=c.execute('SELECT * FROM exercises WHERE active=1').fetchall()
     return render_template('plans.html',rows=rows,members=allowed,exercises=exercises,limit=limit)
 

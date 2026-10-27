@@ -76,4 +76,28 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(self.c.get(path).status_code,200)
   self.assertEqual(self.c.get('/account').status_code,403)
 
+ def test_delete_member_preserves_history_and_revokes_session(self):
+  self.signup();self.login();self.post('/account',{'package':1})
+  with db() as c:
+   mid=c.execute("SELECT id FROM members WHERE email='a@example.com'").fetchone()[0]
+   c.execute("UPDATE invoices SET paid_at='2026-01-01' WHERE member=?",(mid,))
+  url=f'/members/{mid}/delete'
+  self.assertEqual(self.post(url,{'confirm':str(mid)}).status_code,403)
+  staff=app.test_client();self.login('letan','Gym@12345',staff)
+  self.assertEqual(staff.get(url).status_code,200)
+  self.assertEqual(staff.post(url,data={'confirm':str(mid)}).status_code,400)
+  self.post(url,{'confirm':'wrong'},staff)
+  with db() as c: self.assertIsNone(c.execute('SELECT deleted_at FROM members WHERE id=?',(mid,)).fetchone()[0])
+  self.assertEqual(self.post(url,{'confirm':str(mid)},staff).status_code,302)
+  self.assertNotIn('a@example.com',staff.get('/members').get_data(as_text=True))
+  self.assertEqual(self.c.get('/account').status_code,302)
+  self.assertEqual(self.login().status_code,200)
+  with db() as c:
+   self.assertEqual(c.execute('SELECT sum(amount) FROM invoices WHERE paid_at IS NOT NULL').fetchone()[0],500000)
+   self.assertIsNotNone(c.execute('SELECT deleted_at FROM members WHERE id=?',(mid,)).fetchone()[0])
+  self.assertEqual(self.post(url,{'confirm':str(mid)},staff).status_code,404)
+  for user in ['hlv','thungan']:
+   other=app.test_client();self.login(user,'Gym@12345',other)
+   self.assertEqual(self.post(url,{'confirm':str(mid)},other).status_code,403)
+
 if __name__=='__main__': unittest.main()
