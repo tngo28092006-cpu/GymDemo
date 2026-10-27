@@ -15,11 +15,11 @@ Mật khẩu chung ban đầu: Gym@12345
 - letan: đăng ký tại quầy, xem hội viên, gán HLV
 - hlv: tạo/xóa lịch cho hội viên được phân công
 - thungan: xem hóa đơn và xác nhận đã thu tiền
-Đăng ký trực tuyến: http://127.0.0.1:5000/register (không cần đăng nhập).
+Đăng ký tài khoản trực tuyến: http://127.0.0.1:5000/signup.
 Có thể đặt biến môi trường DEMO_PASSWORD trước lần chạy đầu để đổi mật khẩu khởi tạo.
 
 ## Kịch bản chạy thử
-1. Đăng ký một hội viên tại /register, điền email và chọn gói tập.
+1. Tạo tài khoản tại /signup, đăng nhập rồi chọn gói tại /account.
 2. Đăng nhập admin hoặc letan, vào Hội viên, gán HLV hlv.
 3. Đăng nhập admin hoặc thungan, vào Thanh toán, xác nhận đã thu tiền.
 4. Đăng nhập hlv, tạo Squat, 3 hiệp, 15 lần, Thứ 2/4/6.
@@ -33,7 +33,7 @@ Có thể đặt biến môi trường DEMO_PASSWORD trước lần chạy đầ
 - Tổng số ngày KHÁC NHAU trong mọi bài tập của một hội viên không vượt giới hạn.
 - Giảm giới hạn bị chặn nếu lịch hiện tại vượt mức mới: sửa/xóa lịch trước.
 - Xóa danh mục là ẩn bài tập, giữ lịch tập đã tạo.
-- Bản thử nghiệm chưa có gia hạn qua giao diện, hoàn tiền, xuất hóa đơn PDF hoặc quản lý tài khoản nhân viên. Mỗi lần đăng ký mới tạo một hội viên mới. Lịch sử thanh toán thể hiện trong bảng hóa đơn theo mã hội viên.
+- Bản thử nghiệm chưa có hoàn tiền, xuất hóa đơn PDF hoặc quản lý tài khoản nhân viên. Mỗi lần đăng ký mới tạo một hội viên mới. Lịch sử thanh toán thể hiện trong bảng hóa đơn theo mã hội viên.
 
 ## Email SMTP (tùy chọn)
 Trong PyCharm: Run > Edit Configurations > Environment variables, thêm:
@@ -55,3 +55,22 @@ Có phân quyền phía server, băm mật khẩu, CSRF và SQL tham số hóa.
 Trước triển khai thật cần quản lý tài khoản/mật khẩu, giới hạn đăng nhập, HTTPS, sao lưu,
 xử lý email nền và kiểm tra dữ liệu email/điện thoại đầy đủ hơn.
 Không đưa gym.db chứa thông tin hội viên lên GitHub.
+
+
+## Tài khoản hội viên (luồng mới)
+1. Mở /signup: nhập hồ sơ, email, mật khẩu và xác nhận mật khẩu.
+2. Tạo tài khoản chỉ tạo hồ sơ, chưa tạo hóa đơn hay kích hoạt gói tập.
+3. Đăng nhập bằng email ở /login, chọn gói trên /account.
+4. Thu ngân xác nhận thanh toán; hội viên xem hạn gói, HLV, lịch tập và hóa đơn riêng.
+5. Chỉ được có một hóa đơn chờ thanh toán; có thể mua tiếp/gia hạn sau khi hóa đơn được thu.
+
+/register chỉ dành cho lễ tân/admin đăng ký tại quầy; người chưa đăng nhập phải tạo tài khoản trước.
+Dữ liệu cũ được giữ khi chạy lại index.py: tự thêm cột liên kết tài khoản và chỉ mục duy nhất.
+Hồ sơ cũ không tự gắn tài khoản theo email (email chưa được xác minh). Nếu email đã có hồ sơ,
+đăng ký tài khoản bị chặn và yêu cầu liên hệ lễ tân. Luồng kích hoạt tài khoản cho hồ sơ cũ chưa có giao diện.
+Không xóa gym.db khi cập nhật. Sao lưu gym.db trước khi nâng cấp.
+Thống kê đăng ký hội viên tính theo ngày tạo hồ sơ tài khoản; doanh thu chỉ tính sau khi thu tiền.
+Email SMTP được gửi khi chọn gói thành công, không gửi khi mới tạo tài khoản.
+Chưa có xác minh email, quên mật khẩu hoặc giới hạn thử đăng nhập; chỉ dùng localhost demo.
+
+Chạy kiểm tra: `python -m unittest discover -s tests -v`.
