@@ -284,7 +284,7 @@ def member_area(page):
             if not package:
                 flash('Gói tập không hợp lệ.')
             elif current_months and package['months']<current_months:
-                flash('Không thể đăng ký gói thấp hơn gói hiện tại.')
+                flash('Không thể đăng ký gói thấp hơn gói hiện tại.','package_popup')
             elif pending:
                 flash('Bạn đã có hóa đơn chờ thanh toán. Vui lòng liên hệ thu ngân.')
             else:

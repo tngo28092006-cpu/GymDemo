@@ -91,7 +91,7 @@ class MemberFlow(unittest.TestCase):
   from datetime import date
   self.signup();self.login();self.post('/account/packages',{'package':2})
   result=self.post('/account/packages',{'package':1})
-  self.assertIn('Không thể đăng ký gói thấp hơn gói hiện tại.',self.c.get(result.location).get_data(as_text=True))
+  self.assertIn('data-popup-message="Không thể đăng ký gói thấp hơn gói hiện tại."',self.c.get(result.location).get_data(as_text=True))
   with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0],1)
   staff=app.test_client();self.login('letan','Gym@12345',staff)
   self.post('/payments',{'invoice':1},staff)

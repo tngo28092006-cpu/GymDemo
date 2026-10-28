@@ -1,4 +1,17 @@
 (() => {
+  document.querySelectorAll('[data-popup-message]').forEach(notice=>{
+    if(typeof HTMLDialogElement==='undefined')return;
+    const dialog=document.createElement('dialog');dialog.className='package-alert';
+    dialog.setAttribute('aria-labelledby','package-alert-title');dialog.setAttribute('aria-describedby','package-alert-description');
+    const symbol=document.createElement('div');symbol.className='package-alert-icon';symbol.textContent='!';symbol.setAttribute('aria-hidden','true');
+    const title=document.createElement('h2');title.id='package-alert-title';title.textContent='Không thể đăng ký';
+    const description=document.createElement('p');description.id='package-alert-description';description.textContent=notice.dataset.popupMessage;
+    const button=document.createElement('button');button.type='button';button.textContent='Đã hiểu';button.autofocus=true;
+    button.addEventListener('click',()=>dialog.close());
+    dialog.append(symbol,title,description,button);document.body.appendChild(dialog);
+    dialog.addEventListener('close',()=>{dialog.remove();document.querySelector('.package-card button:not(:disabled)')?.focus();});
+    dialog.showModal();notice.remove();
+  });
   const menu = document.querySelector('.menu-toggle');
   const sidebar = document.querySelector('.sidebar');
   const overlay = document.querySelector('.sidebar-overlay');
