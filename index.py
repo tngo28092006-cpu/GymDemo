@@ -54,6 +54,16 @@ def db():
     return c
 
 
+def seed_default_users(c):
+    c.execute('INSERT OR IGNORE INTO users(username,password,role) VALUES(?,?,?)',
+              ('admin',generate_password_hash(os.getenv('DEMO_PASSWORD','Gym@12345')),'admin'))
+    if not c.execute("SELECT 1 FROM app_migrations WHERE name='seed-reception-v1'").fetchone():
+        if not c.execute("SELECT 1 FROM users WHERE role='reception'").fetchone():
+            c.execute('INSERT OR IGNORE INTO users(username,password,role) VALUES(?,?,?)',
+                      ('letan',generate_password_hash(os.getenv('DEMO_PASSWORD','Gym@12345')),'reception'))
+        c.execute("INSERT INTO app_migrations(name) VALUES('seed-reception-v1')")
+
+
 def init_db():
     if app.config['DB_BACKEND']=='mysql':
         initialize_mysql(app.config['MYSQL'])
@@ -69,9 +79,7 @@ def init_db():
             for months, price in [(1,500000),(3,1200000),(6,2000000),(12,3500000)]:
                 c.execute('INSERT OR IGNORE INTO packages(months,price) VALUES(?,?)',(months,price))
             c.execute("UPDATE users SET role='reception' WHERE role='cashier'")
-            for name,role in [('admin','admin'),('letan','reception')]:
-                c.execute('INSERT OR IGNORE INTO users(username,password,role) VALUES(?,?,?)',
-                          (name,generate_password_hash(os.getenv('DEMO_PASSWORD','Gym@12345')),role))
+            seed_default_users(c)
             if not c.execute('SELECT 1 FROM exercises').fetchone():
                 c.executemany('INSERT INTO exercises(name) VALUES(?)',[(x,) for x in ['Squat','Bench press','Deadlift','Chạy bộ']])
         return
@@ -328,9 +336,7 @@ def _init_sqlite_db():
             c.execute('INSERT OR IGNORE INTO packages(months,price) VALUES(?,?)', (months, price))
         # Existing cashier accounts retain their password and now use reception permissions.
         c.execute("UPDATE users SET role='reception' WHERE role='cashier'")
-        for name, role in [('admin', 'admin'), ('letan', 'reception')]:
-            c.execute('INSERT OR IGNORE INTO users(username,password,role) VALUES(?,?,?)',
-                      (name, generate_password_hash(os.getenv('DEMO_PASSWORD', 'Gym@12345')), role))
+        seed_default_users(c)
         if not c.execute('SELECT 1 FROM exercises').fetchone():
             c.executemany('INSERT INTO exercises(name) VALUES(?)',
                           [(x,) for x in ['Squat', 'Bench press', 'Deadlift', 'Chạy bộ']])
@@ -867,9 +873,9 @@ def cancel_trainer():
 
 
 @app.route('/account/password', methods=['GET', 'POST'])
-@require('member')
+@require('member','admin')
 def change_password():
-    if session['role'] != 'member': abort(403)
+    if session['role'] not in ['member','admin']: abort(403)
     if request.method == 'POST':
         with db() as c:
             c.execute('BEGIN IMMEDIATE')
@@ -885,8 +891,11 @@ def change_password():
             else:
                 c.execute('UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',
                           (generate_password_hash(password), user['id']))
-                target = c.execute('SELECT id FROM members WHERE user_id=?', (user['id'],)).fetchone()
-                notify_member(c, target['id'], 'Thay đổi mật khẩu thành công.', '/account/info')
+                if user['role']=='member':
+                    target = c.execute('SELECT id FROM members WHERE user_id=?', (user['id'],)).fetchone()
+                    notify_member(c, target['id'], 'Thay đổi mật khẩu thành công.', '/account/info')
+                else:
+                    notify_staff(c,user['id'],'Thay đổi mật khẩu admin thành công.','/')
                 session.clear()
                 flash('Đổi mật khẩu thành công. Vui lòng đăng nhập lại bằng mật khẩu mới.')
                 return redirect('/login')
@@ -952,6 +961,73 @@ def dashboard():
                            totals=[totals.get(f'{i:02}', 0) for i in range(1, 13)])
 
 
+@app.route('/receptionists',methods=['GET','POST'])
+@require('admin')
+def manage_receptionists():
+    if request.method=='POST':
+        f=request.form
+        username=f.get('username','').strip().lower()
+        name=f.get('full_name','').strip()
+        password=f.get('password','')
+        if not re.fullmatch(r'[a-z][a-z0-9_.-]{2,39}',username):
+            flash('Tên đăng nhập cần 3–40 ký tự, bắt đầu bằng chữ không dấu; chỉ chứa chữ, số, dấu chấm, gạch dưới hoặc gạch ngang.')
+        elif not name or len(name)>120:
+            flash('Họ tên lễ tân cần từ 1 đến 120 ký tự.')
+        elif not 8<=len(password)<=128 or password!=f.get('confirm_password'):
+            flash('Mật khẩu cần 8–128 ký tự và khớp với phần nhập lại.')
+        else:
+            try:
+                with db() as c:
+                    c.execute("INSERT INTO users(username,password,role,full_name) VALUES(?,?,'reception',?)",(username,generate_password_hash(password),name))
+                flash('Đã tạo tài khoản lễ tân '+username+'.')
+                return redirect('/receptionists')
+            except DB_INTEGRITY_ERRORS:
+                flash('Tên đăng nhập đã tồn tại. Hãy chọn tên khác.')
+    with db() as c:
+        rows=c.execute("SELECT id,username,full_name FROM users WHERE role='reception' AND active=1 ORDER BY id DESC").fetchall()
+    return render_template('receptionists.html',rows=rows)
+
+
+@app.route('/receptionists/<int:uid>/password',methods=['GET','POST'])
+@require('admin')
+def reset_reception_password(uid):
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        staff=c.execute("SELECT id,username,full_name FROM users WHERE id=? AND role='reception' AND active=1",(uid,)).fetchone()
+        if not staff: abort(404)
+        if request.method=='POST':
+            password=request.form.get('password','')
+            operator=c.execute('SELECT password FROM users WHERE id=?',(session['uid'],)).fetchone()
+            if not check_password_hash(operator['password'],request.form.get('current_password','')):
+                flash('Mật khẩu admin hiện tại không đúng.')
+            elif not 8<=len(password)<=128 or password!=request.form.get('confirm_password'):
+                flash('Mật khẩu mới cần 8–128 ký tự và khớp với phần nhập lại.')
+            else:
+                c.execute('UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',(generate_password_hash(password),uid))
+                notify_staff(c,uid,'Admin đã đặt lại mật khẩu lễ tân của bạn thành công.','/')
+                flash('Đã đặt lại mật khẩu lễ tân. Các phiên đăng nhập cũ đã bị đăng xuất.')
+                return redirect('/receptionists')
+    return render_template('password.html',member=None,staff=staff)
+
+
+@app.route('/receptionists/<int:uid>/delete',methods=['GET','POST'])
+@require('admin')
+def delete_receptionist(uid):
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        staff=c.execute("SELECT id,username,full_name FROM users WHERE id=? AND role='reception' AND active=1",(uid,)).fetchone()
+        if not staff: abort(404)
+        if request.method=='POST':
+            if request.form.get('confirm')!='yes':
+                flash('Vui lòng xác nhận bạn chắc chắn muốn xóa lễ tân.')
+            else:
+                c.execute('UPDATE users SET active=0,auth_version=auth_version+1,full_name=?,username=? WHERE id=?',
+                          (staff['full_name'] or staff['username'],'deleted-reception:'+str(uid)+':'+secrets.token_hex(8),uid))
+                flash('Đã xóa lễ tân và khóa các phiên đăng nhập cũ.')
+                return redirect('/receptionists')
+    return render_template('delete_receptionist.html',staff=staff)
+
+
 @app.route('/trainers', methods=['GET', 'POST'])
 @require('reception')
 def manage_trainers():
@@ -996,8 +1072,8 @@ def delete_trainer(tid):
             c.execute("SELECT count(*) FROM trainer_requests WHERE trainer=? AND status='pending'", (tid,)).fetchone()[
                 0]
         if request.method == 'POST':
-            if request.form.get('confirm','').strip() not in [str(tid),trainer_code(tid)]:
-                flash('Nhập đúng mã HLV để xác nhận xóa.')
+            if request.form.get('confirm') != 'yes':
+                flash('Vui lòng xác nhận bạn chắc chắn muốn xóa HLV.')
             else:
                 c.execute(
                     'UPDATE plans SET active=0 WHERE active=1 AND member IN (SELECT id FROM members WHERE trainer=?)',
@@ -1085,8 +1161,8 @@ def delete_member(mid):
         member = c.execute('SELECT * FROM members WHERE id=? AND deleted_at IS NULL', (mid,)).fetchone()
         if not member: abort(404)
         if request.method == 'POST':
-            if request.form.get('confirm','').strip() not in [str(mid),member_code(mid)]:
-                flash('Nhập đúng mã hội viên để xác nhận xóa.')
+            if request.form.get('confirm') != 'yes':
+                flash('Vui lòng xác nhận bạn chắc chắn muốn xóa hội viên.')
             else:
                 c.execute('UPDATE members SET deleted_at=? WHERE id=?', (datetime.now().isoformat(), mid))
                 c.execute(

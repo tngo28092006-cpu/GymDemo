@@ -105,3 +105,9 @@ python tests/run_mysql.py
 ```
 
 Bài kiểm tra chuyển cấu trúc SQLite cũ được chạy trong bộ SQLite, bỏ qua trong bộ MySQL. Luồng gửi thư được giả lập; kiểm thử tự động không gửi email thật.
+
+## Admin và tài khoản lễ tân
+
+Admin có mục Đổi mật khẩu: nhập mật khẩu hiện tại và mật khẩu mới, sau khi lưu phải đăng nhập lại. Quản lý lễ tân tại /receptionists cho phép tạo tài khoản, đặt lại mật khẩu (cần mật khẩu admin để xác nhận) và xóa lễ tân. Chỉ admin được truy cập. Tài khoản đã xóa bị khóa, các phiên cũ bị thu hồi; dữ liệu và thông báo được giữ. Có thể dùng lại tên đăng nhập để tạo tài khoản mới với ID khác. Lễ tân mặc định đã xóa không tự tạo lại khi khởi động web.
+
+Xóa hội viên/HLV không yêu cầu gõ mã: màn hình hiển thị đúng đối tượng và hỏi chắc chắn, sau đó bấm nút xác nhận hoặc Hủy. Xóa vẫn là POST có CSRF và vẫn giữ lịch sử theo cơ chế trước.
