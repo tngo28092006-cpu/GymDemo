@@ -44,6 +44,49 @@ class MemberFlow(unittest.TestCase):
    self.assertTrue(self.login(phone,'Counter123',member).location.endswith('/account'))
    self.assertEqual(member.get('/account').status_code,200)
 
+ def test_upgrade_credit_replaces_term_and_keeps_revenue(self):
+  from datetime import date,timedelta
+  from index import add_months
+  self.signup();self.login()
+  staff=app.test_client();self.login('letan','Gym@12345',staff)
+  self.post('/account/packages',{'package':1});self.post('/payments',{'invoice':1},staff)
+  today=date.today()
+  with db() as c:
+   c.execute('UPDATE invoices SET created=?,starts=? WHERE id=1',((today-timedelta(days=3)).isoformat(),(today-timedelta(days=3)).isoformat()))
+  self.assertIn('Hoi Vien A',self.c.get('/account').get_data(as_text=True))
+  self.post('/account/packages',{'package':2,'credit_amount':9999999})
+  with db() as c:
+   inv=c.execute('SELECT * FROM invoices WHERE id=2').fetchone()
+   self.assertEqual(inv['amount'],700000);self.assertEqual(inv['credit_amount'],500000)
+   self.assertEqual(inv['upgrade_from'],1)
+   self.assertGreater(c.execute('SELECT expires FROM invoices WHERE id=1').fetchone()[0],today.isoformat())
+  self.post('/payments',{'invoice':2},staff);self.post('/payments',{'invoice':2},staff)
+  with db() as c:
+   inv=c.execute('SELECT * FROM invoices WHERE id=2').fetchone()
+   self.assertEqual(inv['starts'],today.isoformat())
+   self.assertEqual(inv['expires'],add_months(today,3).isoformat())
+   self.assertEqual(c.execute('SELECT expires FROM invoices WHERE id=1').fetchone()[0],today.isoformat())
+   self.assertEqual(c.execute('SELECT sum(amount) FROM invoices WHERE paid_at IS NOT NULL').fetchone()[0],1200000)
+  self.post('/account/packages',{'package':3})
+  with db() as c:
+   inv=c.execute('SELECT * FROM invoices WHERE id=3').fetchone()
+   self.assertEqual(inv['amount'],800000);self.assertEqual(inv['credit_amount'],1200000)
+
+ def test_upgrade_outside_three_days_uses_normal_renewal(self):
+  from datetime import date,timedelta
+  self.signup();self.login();self.post('/account/packages',{'package':1})
+  staff=app.test_client();self.login('admin','Gym@12345',staff)
+  self.post('/payments',{'invoice':1},staff)
+  with db() as c:
+   c.execute('UPDATE invoices SET created=? WHERE id=1',((date.today()-timedelta(days=4)).isoformat(),))
+   old_end=c.execute('SELECT expires FROM invoices WHERE id=1').fetchone()[0]
+  self.post('/account/packages',{'package':2})
+  self.post('/payments',{'invoice':2},staff)
+  with db() as c:
+   inv=c.execute('SELECT * FROM invoices WHERE id=2').fetchone()
+   self.assertEqual(inv['amount'],1200000);self.assertIsNone(inv['upgrade_from'])
+   self.assertEqual(inv['starts'],old_end)
+
  def test_account_first_and_payment(self):
   self.assertEqual(self.c.get('/register').status_code,302)
   self.assertEqual(self.signup().status_code,302)

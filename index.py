@@ -29,6 +29,9 @@ def init_db():
         CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), max_days INTEGER);
         INSERT OR IGNORE INTO settings VALUES(1,6);
         ''')
+        for column, definition in [('upgrade_from','INTEGER REFERENCES invoices(id)'),('credit_amount','INTEGER NOT NULL DEFAULT 0'),('original_expires','TEXT')]:
+            if column not in {r['name'] for r in c.execute('PRAGMA table_info(invoices)')}:
+                c.execute(f'ALTER TABLE invoices ADD COLUMN {column} {definition}')
         if 'active' not in {r['name'] for r in c.execute('PRAGMA table_info(users)')}:
             c.execute('ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1')
         if 'full_name' not in {r['name'] for r in c.execute('PRAGMA table_info(users)')}:
@@ -92,7 +95,12 @@ def csrf():
 
 @app.context_processor
 def context():
-    return dict(today=date.today().isoformat(),role=session.get('role'),csrf=session.get('csrf'))
+    member_name=None
+    if session.get('role')=='member':
+        with db() as c:
+            row=c.execute('SELECT name FROM members WHERE user_id=? AND deleted_at IS NULL',(session.get('uid'),)).fetchone()
+            member_name=row['name'] if row else None
+    return dict(today=date.today().isoformat(),role=session.get('role'),csrf=session.get('csrf'),member_name=member_name)
 
 def add_months(d,n):
     m=d.month-1+n; y=d.year+m//12; m=m%12+1
@@ -237,6 +245,16 @@ def account_packages():
     return member_area('packages')
 
 
+def upgrade_source(c, member_id):
+    today=date.today().isoformat()
+    old=c.execute('SELECT * FROM invoices WHERE member=? AND paid_at IS NOT NULL AND starts<=? AND expires>? ORDER BY expires DESC,id DESC LIMIT 1',(member_id,today,today)).fetchone()
+    if not old or not 0 <= (date.today()-date.fromisoformat(old['created'])).days <= 3:
+        return None
+    if c.execute('SELECT 1 FROM invoices WHERE member=? AND paid_at IS NOT NULL AND starts>?',(member_id,today)).fetchone():
+        return None
+    return old
+
+
 def member_area(page):
     # Admin bypass in require() is appropriate for staff routes, not a member identity.
     if session['role'] != 'member': abort(403)
@@ -267,8 +285,10 @@ def member_area(page):
             elif pending:
                 flash('Bạn đã có hóa đơn chờ thanh toán. Vui lòng liên hệ thu ngân.')
             else:
-                c.execute('INSERT INTO invoices(member,months,amount,created) VALUES(?,?,?,?)',
-                          (member['id'],package['months'],package['price'],date.today().isoformat()))
+                old=upgrade_source(c,member['id'])
+                credit=(old['amount']+old['credit_amount']) if old and package['months']>old['months'] and package['price']>old['amount']+old['credit_amount'] else 0
+                c.execute('INSERT INTO invoices(member,months,amount,created,upgrade_from,credit_amount) VALUES(?,?,?,?,?,?)',
+                          (member['id'],package['months'],package['price']-credit,date.today().isoformat(),old['id'] if credit else None,credit))
                 c.commit()
                 flash('Đã đăng ký gói tập. Vui lòng thanh toán tại quầy. '+confirmation(member['email'],member['name']))
             return redirect('/account/packages')
@@ -276,6 +296,7 @@ def member_area(page):
         plans = c.execute('SELECT p.*,e.name exercise_name FROM plans p JOIN exercises e ON e.id=p.exercise WHERE p.member=? AND p.active=1', (member['id'],)).fetchall()
         active = c.execute('SELECT * FROM invoices WHERE member=? AND paid_at IS NOT NULL AND starts<=? AND expires>? ORDER BY expires DESC LIMIT 1',
                            (member['id'],date.today().isoformat(),date.today().isoformat())).fetchone()
+        upgrade=upgrade_source(c,member['id'])
         packages = c.execute('SELECT * FROM packages ORDER BY months').fetchall()
         trainers = c.execute("SELECT id,username,full_name FROM users WHERE role='trainer' AND active=1 ORDER BY username").fetchall()
         trainer_requests = c.execute('SELECT r.*,(CASE WHEN length(u.full_name)>0 THEN u.full_name ELSE u.username END) trainer_name FROM trainer_requests r JOIN users u ON u.id=r.trainer WHERE r.member=? ORDER BY r.id DESC',(member['id'],)).fetchall()
@@ -298,7 +319,7 @@ def member_area(page):
         days_remaining = None
     template = {'home':'member_home.html','info':'account.html','packages':'member_packages.html'}[page]
     return render_template(template,member=member,invoices=invoices,plans=plans,active=active,packages=packages,
-                           pending=bool(pending_invoice),pending_invoice=pending_invoice,trainers=trainers,
+                           pending=bool(pending_invoice),pending_invoice=pending_invoice,trainers=trainers,upgrade=upgrade,
                            trainer_requests=trainer_requests,pending_request=pending_request,membership=membership,
                            membership_status=membership_status,days_remaining=days_remaining)
 
@@ -531,6 +552,13 @@ def payments():
             if not inv['paid_at']:
                 d=date.today(); last=c.execute('SELECT max(expires) FROM invoices WHERE member=? AND paid_at IS NOT NULL',(inv['member'],)).fetchone()[0]
                 start=max(d,date.fromisoformat(last)) if last else d
+                if inv['upgrade_from']:
+                    old=c.execute('SELECT * FROM invoices WHERE id=? AND member=? AND paid_at IS NOT NULL',(inv['upgrade_from'],inv['member'])).fetchone()
+                    if not old or old['original_expires'] or c.execute('SELECT 1 FROM invoices WHERE upgrade_from=? AND paid_at IS NOT NULL',(old['id'],)).fetchone():
+                        flash('Gói cũ đã được thay thế. Không thể xác nhận hóa đơn nâng gói này.')
+                        return redirect('/payments')
+                    start=d
+                    c.execute('UPDATE invoices SET original_expires=expires,expires=? WHERE id=?',(d.isoformat(),old['id']))
                 c.execute('UPDATE invoices SET paid_at=?,starts=?,expires=? WHERE id=? AND paid_at IS NULL',(d.isoformat(),start.isoformat(),add_months(start,inv['months']).isoformat(),inv['id'])); flash('Đã xác nhận thu tiền, kích hoạt gói tập.')
         rows=c.execute('SELECT i.*,m.name FROM invoices i JOIN members m ON m.id=i.member ORDER BY i.id DESC').fetchall()
     return render_template('payments.html',rows=rows)

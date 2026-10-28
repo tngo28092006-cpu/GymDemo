@@ -90,3 +90,7 @@ Kiểm tra: `python -m unittest discover -s tests -v`.
 
 Đây là bản demo localhost. Chưa có OTP, tự khôi phục mật khẩu hoặc giới hạn thử đăng nhập.
 Trước triển khai công khai cần bổ sung HTTPS, bảo vệ đăng nhập, sao lưu và quản lý tài khoản đầy đủ.
+
+### Nâng gói trong 3 ngày đầu
+
+Hội viên đang có gói còn hiệu lực, chưa có gói trả trước trong tương lai, được nâng sang gói dài hơn và có giá cao hơn trong 0–3 ngày kể từ ngày lập hóa đơn gói hiện tại. Giá trị gói cũ (kể cả khoản đã khấu trừ từ lần nâng trước) được trừ khỏi giá gói mới. Giá và khoản khấu trừ được chốt khi lập hóa đơn, không nhận từ trình duyệt. Khi lễ tân xác nhận khoản chênh lệch, gói mới bắt đầu đủ số tháng từ ngày xác nhận; gói cũ kết thúc và lưu hạn cũ trong lịch sử. Không cộng thêm ngày còn lại của gói cũ. Ngoài điều kiện trên, đăng ký là gia hạn theo cơ chế cũ. Doanh thu chỉ cộng tiền thực thu.
