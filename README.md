@@ -106,3 +106,7 @@ Admin và lễ tân nhận thông báo hội viên tạo tài khoản trực tuy
 ### Phân quyền bảng giá và bài tập
 
 Admin có mục Bảng giá tại /settings, chỉ sửa giá các gói hiện có; không quản lý bài tập hay thay đổi giới hạn ngày tập tại đây. HLV có mục Bài tập tại /exercises để thêm, sửa tên, ẩn bài tập trong danh mục dùng chung. Admin, lễ tân và hội viên không truy cập được chức năng này. Bài tập đã ẩn không xuất hiện khi lập lịch mới, lịch đã xếp vẫn được giữ.
+
+### Mã quản lý
+
+Mã hội viên hiển thị HV_XX và HLV hiển thị HLV_XX, ví dụ HV_08 hoặc HLV_03. Phần số lấy từ ID hiện có, tối thiểu hai chữ số và không cắt các ID từ 100 trở lên. Không thay khóa dữ liệu hoặc thông tin đăng nhập. Màn hình xóa nhận mã hiển thị; biểu mẫu cũ dùng ID số vẫn được hỗ trợ.

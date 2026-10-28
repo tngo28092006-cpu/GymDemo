@@ -12,6 +12,16 @@ app.config['DATABASE'] = str(Path(__file__).with_name('gym.db'))
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax')
 
 
+@app.template_filter('member_code')
+def member_code(value):
+    return f'HV_{int(value):02d}'
+
+
+@app.template_filter('trainer_code')
+def trainer_code(value):
+    return f'HLV_{int(value):02d}'
+
+
 def db():
     c = sqlite3.connect(app.config['DATABASE'])
     c.row_factory = sqlite3.Row
@@ -555,7 +565,7 @@ def register():
                                  '/payments')
                 c.commit()
                 flash(
-                    f'Đăng ký thành công. Mã hội viên: {mid}. Hội viên đăng nhập bằng số điện thoại và mật khẩu vừa tạo. ' + confirmation(
+                    f'Đăng ký thành công. Mã hội viên: {member_code(mid)}. Hội viên đăng nhập bằng số điện thoại và mật khẩu vừa tạo. ' + confirmation(
                         email, name))
                 return redirect('/register')
             except (ValueError, KeyError, sqlite3.IntegrityError):
@@ -852,7 +862,7 @@ def reset_member_password(mid):
                 c.execute('UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',
                           (generate_password_hash(password), member['user_id']))
                 notify_member(c, mid, 'Mật khẩu của bạn đã được nhân viên đặt lại thành công.', '/account/info')
-                flash(f"Đã đặt lại mật khẩu cho hội viên #{mid}. Các phiên đăng nhập cũ đã bị đăng xuất.")
+                flash(f"Đã đặt lại mật khẩu cho hội viên {member_code(mid)}. Các phiên đăng nhập cũ đã bị đăng xuất.")
                 return redirect('/members')
     return render_template('password.html', member=member)
 
@@ -934,7 +944,7 @@ def delete_trainer(tid):
             c.execute("SELECT count(*) FROM trainer_requests WHERE trainer=? AND status='pending'", (tid,)).fetchone()[
                 0]
         if request.method == 'POST':
-            if request.form.get('confirm') != str(tid):
+            if request.form.get('confirm','').strip() not in [str(tid),trainer_code(tid)]:
                 flash('Nhập đúng mã HLV để xác nhận xóa.')
             else:
                 c.execute(
@@ -1023,7 +1033,7 @@ def delete_member(mid):
         member = c.execute('SELECT * FROM members WHERE id=? AND deleted_at IS NULL', (mid,)).fetchone()
         if not member: abort(404)
         if request.method == 'POST':
-            if request.form.get('confirm') != str(mid):
+            if request.form.get('confirm','').strip() not in [str(mid),member_code(mid)]:
                 flash('Nhập đúng mã hội viên để xác nhận xóa.')
             else:
                 c.execute('UPDATE members SET deleted_at=? WHERE id=?', (datetime.now().isoformat(), mid))

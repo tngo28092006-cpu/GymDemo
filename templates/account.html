@@ -3,7 +3,7 @@
         <div><span class="eyebrow">HỒ SƠ HỘI VIÊN</span>
             <h1>Thông tin tài khoản</h1>
             <p>Thông tin cá nhân, bảo mật và huấn luyện viên đồng hành cùng bạn.</p></div>
-        <span class="period-tag">Hội viên #{{ member.id }}</span></div>
+        <span class="period-tag">Hội viên {{ member.id|member_code }}</span></div>
     <div class="grid member-info-grid">
         <section class="panel profile-card">
             <div class="profile-head"><span class="profile-avatar">{{ member.name[0]|upper }}</span>

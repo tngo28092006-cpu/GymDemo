@@ -217,6 +217,27 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(c.execute('SELECT count(*) FROM plans WHERE exercise=?',(eid,)).fetchone()[0],1)
   self.assertNotIn('Leg press machine',hlv.get('/plans').get_data(as_text=True))
 
+ def test_display_codes_and_cancel_password_button(self):
+  from index import member_code,trainer_code
+  self.assertEqual(member_code(8),'HV_08');self.assertEqual(trainer_code(123),'HLV_123')
+  self.signup();self.login()
+  with db() as c:
+   mid=c.execute('SELECT id FROM members').fetchone()[0]
+   tid=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+  self.assertIn(member_code(mid),self.c.get('/account/info').get_data(as_text=True))
+  admin=app.test_client();self.login('admin','Gym@12345',admin)
+  page=admin.get(f'/members/{mid}/password').get_data(as_text=True)
+  self.assertIn(member_code(mid),page)
+  self.assertIn('class="button cancel-button" href="/members">Hủy</a>',page)
+  self.assertIn(trainer_code(tid),admin.get('/trainers').get_data(as_text=True))
+  self.assertIn(member_code(mid),admin.get('/members').get_data(as_text=True))
+  self.assertIn(trainer_code(tid),admin.get(f'/trainers/{tid}/delete').get_data(as_text=True))
+  self.post(f'/trainers/{tid}/delete',{'confirm':trainer_code(tid)},admin)
+  self.post(f'/members/{mid}/delete',{'confirm':member_code(mid)},admin)
+  with db() as c:
+   self.assertEqual(c.execute('SELECT active FROM users WHERE id=?',(tid,)).fetchone()[0],0)
+   self.assertIsNotNone(c.execute('SELECT deleted_at FROM members WHERE id=?',(mid,)).fetchone()[0])
+
  def test_account_first_and_payment(self):
   self.assertEqual(self.c.get('/register').status_code,302)
   self.assertEqual(self.signup().status_code,302)
