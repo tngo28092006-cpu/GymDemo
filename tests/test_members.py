@@ -23,6 +23,27 @@ class MemberFlow(unittest.TestCase):
   return self.post('/signup',data)
  def login(self,user='0901234567',password='Member12345',client=None):
   return self.post('/login',dict(username=user,password=password),client)
+ def test_staff_registration_creates_login_atomically(self):
+  for role,phone in [('admin','0901111111'),('letan','0902222222')]:
+   staff=app.test_client();self.login(role,'Gym@12345',staff)
+   page=staff.get('/register').get_data(as_text=True)
+   self.assertIn('name="confirm_password"',page)
+   data=dict(name='At counter',gender='Nam',birth=2000,phone=phone,email='',package=1,password='Counter123',confirm_password='wrong')
+   self.assertEqual(self.post('/register',data,staff).status_code,200)
+   with db() as c:
+    self.assertEqual(c.execute('SELECT count(*) FROM members WHERE phone=?',(phone,)).fetchone()[0],0)
+   data['confirm_password']='Counter123'
+   self.assertEqual(self.post('/register',data,staff).status_code,302)
+   self.post('/register',data,staff)
+   with db() as c:
+    rows=c.execute('SELECT m.*,u.password,u.role FROM members m JOIN users u ON u.id=m.user_id WHERE m.phone=?',(phone,)).fetchall()
+    self.assertEqual(len(rows),1);self.assertEqual(rows[0]['role'],'member')
+    self.assertTrue(check_password_hash(rows[0]['password'],'Counter123'))
+    self.assertEqual(c.execute('SELECT count(*) FROM invoices WHERE member=?',(rows[0]['id'],)).fetchone()[0],1)
+   member=app.test_client()
+   self.assertTrue(self.login(phone,'Counter123',member).location.endswith('/account'))
+   self.assertEqual(member.get('/account').status_code,200)
+
  def test_account_first_and_payment(self):
   self.assertEqual(self.c.get('/register').status_code,302)
   self.assertEqual(self.signup().status_code,302)

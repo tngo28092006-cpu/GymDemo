@@ -169,14 +169,20 @@ def register():
         if request.method=='POST':
             try:
                 f=request.form; name=f['name'].strip(); email=f['email'].strip(); phone=normalize_phone(f['phone']); birth=int(f['birth'])
-                if not name or len(name)>120 or not valid_email(email) or not phone or not 1900<=birth<=date.today().year or f['gender'] not in ['Nam','Nữ','Khác']: raise ValueError()
+                password=f.get('password','')
+                if not name or len(name)>120 or not valid_email(email) or not phone or not 1900<=birth<=date.today().year or f['gender'] not in ['Nam','Nữ','Khác'] or not 8<=len(password)<=128 or password!=f.get('confirm_password'): raise ValueError()
                 p=c.execute('SELECT * FROM packages WHERE id=?',(f['package'],)).fetchone()
                 if not p: raise ValueError()
+                c.execute('BEGIN IMMEDIATE')
+                if any(normalize_phone(row['phone'])==phone for row in c.execute('SELECT phone FROM members WHERE deleted_at IS NULL')):
+                    flash('Số điện thoại đã có hồ sơ hội viên. Vui lòng dùng tài khoản hiện có.')
+                    return render_template('register.html',packages=packages)
+                uid=c.execute("INSERT INTO users(username,password,role) VALUES(?,?,'member')",('member:'+secrets.token_hex(16),generate_password_hash(password))).lastrowid
                 d=date.today().isoformat(); source='Tại quầy' if session.get('role') in ['admin','reception'] else 'Trực tuyến'
-                mid=c.execute('INSERT INTO members(name,gender,birth,phone,email,registered,source) VALUES(?,?,?,?,?,?,?)',(name,f['gender'],birth,phone,email,d,source)).lastrowid
+                mid=c.execute('INSERT INTO members(name,gender,birth,phone,email,registered,source,user_id) VALUES(?,?,?,?,?,?,?,?)',(name,f['gender'],birth,phone,email,d,source,uid)).lastrowid
                 c.execute('INSERT INTO invoices(member,months,amount,created) VALUES(?,?,?,?)',(mid,p['months'],p['price'],d)); c.commit()
-                flash(f'Đăng ký thành công. Mã hội viên: {mid}. '+confirmation(email,name)); return redirect('/register')
-            except (ValueError,KeyError): flash('Thông tin không hợp lệ. Kiểm tra năm sinh, email và số điện thoại.')
+                flash(f'Đăng ký thành công. Mã hội viên: {mid}. Hội viên đăng nhập bằng số điện thoại và mật khẩu vừa tạo. '+confirmation(email,name)); return redirect('/register')
+            except (ValueError,KeyError,sqlite3.IntegrityError): flash('Thông tin không hợp lệ. Kiểm tra thông tin hội viên và mật khẩu khớp nhau (8–128 ký tự).')
     return render_template('register.html',packages=packages)
 
 @app.route('/signup', methods=['GET', 'POST'])
