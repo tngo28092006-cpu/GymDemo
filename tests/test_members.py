@@ -1,4 +1,5 @@
-import tempfile, unittest, sqlite3
+import tempfile, unittest, sqlite3, os
+os.environ.setdefault("DB_BACKEND","sqlite")
 from pathlib import Path
 from unittest.mock import patch
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -687,12 +688,13 @@ class MemberFlow(unittest.TestCase):
   self.assertEqual(self.post('/trainers',dict(username='hacker')).status_code,403)
 
  def test_trainer_creation_validation_and_no_default_trainer(self):
-  with tempfile.TemporaryDirectory() as t:
-   original=app.config['DATABASE'];app.config['DATABASE']=str(Path(t)/'fresh.db')
-   try:
-    init_db()
-    with db() as c: self.assertEqual(c.execute("SELECT count(*) FROM users WHERE role='trainer'").fetchone()[0],0)
-   finally: app.config['DATABASE']=original
+  if app.config['DB_BACKEND']=='sqlite':
+   with tempfile.TemporaryDirectory() as t:
+    original=app.config['DATABASE'];app.config['DATABASE']=str(Path(t)/'fresh.db')
+    try:
+     init_db()
+     with db() as c: self.assertEqual(c.execute("SELECT count(*) FROM users WHERE role='trainer'").fetchone()[0],0)
+    finally: app.config['DATABASE']=original
   self.login('letan','Gym@12345')
   base=dict(full_name='Trainer',username='new_hlv',password='Trainer12345',confirm_password='Trainer12345')
   for override in [dict(username='admin'),dict(username='12phone'),dict(username='a'),dict(full_name=''),dict(password='short',confirm_password='short'),dict(confirm_password='different')]:

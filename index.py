@@ -5,9 +5,20 @@ from functools import wraps
 from email.message import EmailMessage
 from flask import Flask, render_template, request, redirect, url_for, session, flash, abort
 from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
+import pymysql
+from mysql_backend import Connection as MySQLConnection, initialize as initialize_mysql
+
+# Explicit path also works when launched by Flask CLI from another directory.
+load_dotenv(Path(__file__).with_name('.env'), override=False)
+DB_INTEGRITY_ERRORS = (sqlite3.IntegrityError, pymysql.IntegrityError)
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY') or secrets.token_hex(32)
+app.config['DB_BACKEND'] = os.getenv('DB_BACKEND','mysql').lower()
+app.config['MYSQL'] = dict(host=os.getenv('MYSQL_HOST','127.0.0.1'),port=int(os.getenv('MYSQL_PORT','3306')),
+                           user=os.getenv('MYSQL_USER','root'),password=os.getenv('MYSQL_PASSWORD',''),
+                           database=os.getenv('MYSQL_DATABASE','gym_demo'))
 app.config['DATABASE'] = str(Path(__file__).with_name('gym.db'))
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax')
 
@@ -33,6 +44,10 @@ def trainer_code(value):
 
 
 def db():
+    if app.config['DB_BACKEND']=='mysql':
+        return MySQLConnection(app.config['MYSQL'])
+    if app.config['DB_BACKEND']!='sqlite':
+        raise ValueError('DB_BACKEND must be mysql (normal use) or sqlite (legacy tests)')
     c = sqlite3.connect(app.config['DATABASE'])
     c.row_factory = sqlite3.Row
     c.execute('PRAGMA foreign_keys=ON')
@@ -40,6 +55,30 @@ def db():
 
 
 def init_db():
+    if app.config['DB_BACKEND']=='mysql':
+        initialize_mysql(app.config['MYSQL'])
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            if not c.execute("SELECT 1 FROM app_migrations WHERE name='trainer-consent-v1'").fetchone():
+                # Existing assignments must be confirmed by the selected trainer as well.
+                c.execute(
+                    "INSERT INTO trainer_requests(member,trainer,status,created) SELECT m.id,m.trainer,'pending',? FROM members m JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL AND u.role='trainer' AND u.active=1",
+                    (datetime.now().isoformat(),))
+                c.execute('UPDATE members SET trainer=NULL WHERE deleted_at IS NULL')
+                c.execute("INSERT INTO app_migrations VALUES('trainer-consent-v1')")
+            for months, price in [(1,500000),(3,1200000),(6,2000000),(12,3500000)]:
+                c.execute('INSERT OR IGNORE INTO packages(months,price) VALUES(?,?)',(months,price))
+            c.execute("UPDATE users SET role='reception' WHERE role='cashier'")
+            for name,role in [('admin','admin'),('letan','reception')]:
+                c.execute('INSERT OR IGNORE INTO users(username,password,role) VALUES(?,?,?)',
+                          (name,generate_password_hash(os.getenv('DEMO_PASSWORD','Gym@12345')),role))
+            if not c.execute('SELECT 1 FROM exercises').fetchone():
+                c.executemany('INSERT INTO exercises(name) VALUES(?)',[(x,) for x in ['Squat','Bench press','Deadlift','Chạy bộ']])
+        return
+    _init_sqlite_db()
+
+
+def _init_sqlite_db():
     with db() as c:
         c.executescript('''
                         CREATE TABLE IF NOT EXISTS users
@@ -486,7 +525,7 @@ def login():
     if request.method == 'POST':
         identifier = request.form.get('username', '').strip()
         with db() as c:
-            u: sqlite3.Row | None = c.execute(
+            u = c.execute(
                 "SELECT * FROM users WHERE username=? AND role!='member'",
                 (identifier.lower(),)
             ).fetchone()
@@ -578,7 +617,7 @@ def register():
                     f'Đăng ký thành công. Mã hội viên: {member_code(mid)}. Hội viên đăng nhập bằng số điện thoại và mật khẩu vừa tạo. ' + confirmation(
                         email, name))
                 return redirect('/register')
-            except (ValueError, KeyError, sqlite3.IntegrityError):
+            except (ValueError, KeyError, *DB_INTEGRITY_ERRORS):
                 flash('Thông tin không hợp lệ. Email là bắt buộc. Kiểm tra thông tin hội viên và mật khẩu khớp nhau (8–128 ký tự).')
     return render_template('register.html', packages=packages)
 
@@ -615,7 +654,7 @@ def signup():
                 notify_reception(c, f'Hội viên {name} vừa đăng ký tài khoản trực tuyến.', '/members')
             flash('Tạo tài khoản thành công! Hãy đăng nhập bằng số điện thoại để chọn gói tập. '+confirmation(email,name))
             return redirect('/login')
-        except (ValueError, sqlite3.IntegrityError):
+        except (ValueError, *DB_INTEGRITY_ERRORS):
             flash(
                 'Không thể tạo tài khoản. Email là bắt buộc và phải hợp lệ. Kiểm tra số điện thoại và mật khẩu khớp nhau (8–128 ký tự).')
     return render_template('signup.html')
@@ -935,7 +974,7 @@ def manage_trainers():
                               (username, generate_password_hash(password), 'trainer', name))
                 flash(f'Đã tạo tài khoản HLV {username}. HLV có thể đăng nhập và nhận yêu cầu của hội viên.')
                 return redirect('/trainers')
-            except sqlite3.IntegrityError:
+            except DB_INTEGRITY_ERRORS:
                 flash('Tên đăng nhập đã tồn tại. Hãy chọn tên khác.')
     with db() as c:
         trainers = c.execute(
@@ -1162,7 +1201,7 @@ def settings():
             if request.form.get('action') != 'price': abort(400)
             try:
                 price=int(request.form.get('price',''))
-                if price<=0: raise ValueError()
+                if not 1<=price<=2147483647: raise ValueError()
                 changed=c.execute('UPDATE packages SET price=? WHERE id=?',(price,request.form.get('id',''))).rowcount
                 if not changed: raise ValueError()
                 flash('Đã lưu giá mới. Hóa đơn đã lập giữ nguyên giá ban đầu.')
@@ -1193,7 +1232,7 @@ def manage_exercises():
                 else: raise ValueError()
                 flash('Đã cập nhật danh mục bài tập.')
                 return redirect('/exercises')
-            except (ValueError,sqlite3.IntegrityError):
+            except (ValueError, *DB_INTEGRITY_ERRORS):
                 flash('Bài tập không hợp lệ hoặc trùng tên. Tên phải có từ 1 đến 100 ký tự.')
         exercises=c.execute('SELECT * FROM exercises WHERE active=1 ORDER BY name,id').fetchall()
     return render_template('exercises.html',exercises=exercises)
