@@ -1,0 +1,40 @@
+{% extends 'base.html' %}{% block content %}
+    <div class="section-heading">
+        <div><span class="eyebrow">HỒ SƠ HỘI VIÊN</span>
+            <h1>Thông tin tài khoản</h1>
+            <p>Thông tin cá nhân, bảo mật và huấn luyện viên đồng hành cùng bạn.</p></div>
+        <span class="period-tag">Hội viên #{{ member.id }}</span></div>
+    <div class="grid member-info-grid">
+        <section class="panel profile-card">
+            <div class="profile-head"><span class="profile-avatar">{{ member.name[0]|upper }}</span>
+                <div><h2>Thông tin của bạn</h2>
+                    <p>{{ member.name }}</p></div>
+            </div>
+            <div class="profile-facts">
+                <div><small>SỐ ĐIỆN THOẠI</small><span>{{ member.phone }}</span></div>
+                <div><small>GIỚI TÍNH / NĂM SINH</small><span>{{ member.gender }} · {{ member.birth }}</span></div>
+                <div><small>EMAIL</small><span>{{ member.email or 'Chưa thêm email' }}</span></div>
+                <div><small>HUẤN LUYỆN VIÊN</small><span>{{ member.trainer_name or 'Chưa được phân công' }}</span></div>
+            </div>
+            <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action"
+                                                                                           value="email"><label>Email
+                nhận xác nhận <span class="muted">(không bắt buộc)</span><input type="email" name="email"
+                                                                                maxlength="254"
+                                                                                value="{{ member.email or '' }}"
+                                                                                autocomplete="email"
+                                                                                placeholder="Thêm email để nhận xác nhận"></label>
+                <p class="muted"><small>Có thể để trống. Email không dùng để đăng nhập.</small></p>
+                <div class="account-actions">
+                    <button>Lưu email</button>
+                    <a class="button" href="/account/password">Đổi mật khẩu</a></div>
+            </form>
+        </section>
+        <section class="panel"><h2>Tài khoản của bạn</h2>
+            <div class="account-detail"><span>Họ và tên</span><strong>{{ member.name }}</strong></div>
+            <div class="account-detail"><span>Số điện thoại đăng nhập</span><strong>{{ member.phone }}</strong></div>
+            <div class="account-detail"><span>Ngày tạo hồ sơ</span><strong>{{ member.registered }}</strong></div>
+            <div class="account-detail"><span>Kênh đăng ký</span><strong>{{ member.source }}</strong></div>
+            <p class="muted" style="margin-top:20px"><small>Email là thông tin tùy chọn. Bạn luôn đăng nhập bằng số điện
+                thoại.</small></p><a class="button secondary" href="/account">{{ icon('calendar') }} Xem lịch tập của
+                bạn</a></section>
+    </div>{% include 'member_trainer_panel.html' %}{% endblock %}
