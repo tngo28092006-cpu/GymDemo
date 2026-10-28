@@ -24,6 +24,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS packages(id INTEGER PRIMARY KEY, months INTEGER UNIQUE, price INTEGER CHECK(price>0));
         CREATE TABLE IF NOT EXISTS members(id INTEGER PRIMARY KEY, name TEXT, gender TEXT, birth INTEGER, phone TEXT, email TEXT, registered TEXT, source TEXT, trainer INTEGER REFERENCES users(id));
         CREATE TABLE IF NOT EXISTS invoices(id INTEGER PRIMARY KEY, member INTEGER REFERENCES members(id), months INTEGER, amount INTEGER, created TEXT, paid_at TEXT, starts TEXT, expires TEXT);
+        CREATE TABLE IF NOT EXISTS staff_notifications(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),message TEXT NOT NULL,link TEXT NOT NULL,created TEXT NOT NULL,read_at TEXT);
+        CREATE INDEX IF NOT EXISTS staff_notifications_user ON staff_notifications(user_id,id);
         CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, member INTEGER NOT NULL REFERENCES members(id), message TEXT NOT NULL, link TEXT NOT NULL, created TEXT NOT NULL, read_at TEXT);
         CREATE INDEX IF NOT EXISTS notifications_member ON notifications(member,id);
         CREATE TABLE IF NOT EXISTS exercises(id INTEGER PRIMARY KEY, name TEXT UNIQUE, active INTEGER DEFAULT 1);
@@ -106,7 +108,42 @@ def context():
             if row:
                 notifications=c.execute('SELECT n.* FROM notifications n JOIN members m ON m.id=n.member WHERE m.user_id=? AND m.deleted_at IS NULL ORDER BY n.id DESC LIMIT 8',(session['uid'],)).fetchall()
                 unread_notifications=c.execute('SELECT count(*) FROM notifications n JOIN members m ON m.id=n.member WHERE m.user_id=? AND m.deleted_at IS NULL AND n.read_at IS NULL',(session['uid'],)).fetchone()[0]
-    return dict(today=date.today().isoformat(),role=session.get('role'),csrf=session.get('csrf'),member_name=member_name,notifications=notifications,unread_notifications=unread_notifications)
+    if session.get('role') in ['admin','reception','trainer']:
+        with db() as c:
+            notifications=c.execute('SELECT * FROM staff_notifications WHERE user_id=? ORDER BY id DESC LIMIT 8',(session['uid'],)).fetchall()
+            unread_notifications=c.execute('SELECT count(*) FROM staff_notifications WHERE user_id=? AND read_at IS NULL',(session['uid'],)).fetchone()[0]
+    return dict(notification_root='/account/notifications' if session.get('role')=='member' else '/notifications',today=date.today().isoformat(),role=session.get('role'),csrf=session.get('csrf'),member_name=member_name,notifications=notifications,unread_notifications=unread_notifications)
+
+def notify_staff(c,user_id,message,link):
+    c.execute('INSERT INTO staff_notifications(user_id,message,link,created) SELECT id,?,?,? FROM users WHERE id=? AND active=1',(message,link,datetime.now().isoformat(timespec='seconds'),user_id))
+
+
+def notify_reception(c,message,link):
+    for user in c.execute("SELECT id FROM users WHERE role IN ('admin','reception') AND active=1").fetchall():
+        notify_staff(c,user['id'],message,link)
+
+
+@app.route('/notifications',methods=['GET','POST'])
+@require('reception','trainer')
+def staff_notifications():
+    with db() as c:
+        if request.method=='POST':
+            c.execute('UPDATE staff_notifications SET read_at=? WHERE user_id=? AND read_at IS NULL',(datetime.now().isoformat(timespec='seconds'),session['uid']))
+            return redirect('/notifications')
+        rows=c.execute('SELECT * FROM staff_notifications WHERE user_id=? ORDER BY id DESC LIMIT 100',(session['uid'],)).fetchall()
+    return render_template('notifications.html',rows=rows)
+
+
+@app.post('/notifications/<int:nid>/read')
+@require('reception','trainer')
+def read_staff_notification(nid):
+    with db() as c:
+        item=c.execute('SELECT * FROM staff_notifications WHERE id=? AND user_id=?',(nid,session['uid'])).fetchone()
+        if not item: abort(404)
+        c.execute('UPDATE staff_notifications SET read_at=coalesce(read_at,?) WHERE id=?',(datetime.now().isoformat(timespec='seconds'),nid))
+    allowed=['/trainer-requests','/members','/'] if session['role']=='trainer' else ['/members','/payments','/trainers','/']
+    return redirect(item['link'] if item['link'] in allowed else '/')
+
 
 def notify_member(c, member_id, message, link):
     c.execute('INSERT INTO notifications(member,message,link,created) VALUES(?,?,?,?)',(member_id,message,link,datetime.now().isoformat(timespec='seconds')))
@@ -161,6 +198,7 @@ def request_trainer(c, member_id, trainer_id):
     if c.execute("SELECT 1 FROM trainer_requests WHERE member=? AND status='pending'", (member_id,)).fetchone():
         return 'Đã có yêu cầu chờ xác nhận. Hủy yêu cầu cũ trước khi chọn lại.'
     c.execute("INSERT INTO trainer_requests(member,trainer,status,created) VALUES(?,?,'pending',?)", (member_id,trainer_id,datetime.now().isoformat()))
+    notify_staff(c,trainer['id'],f"Hội viên {member['name']} đã gửi yêu cầu đăng ký HLV cho bạn.",'/trainer-requests')
     return 'Đã gửi yêu cầu. HLV cần xác nhận trước khi lập lịch cho bạn.'
 
 
@@ -223,7 +261,9 @@ def register():
                 uid=c.execute("INSERT INTO users(username,password,role) VALUES(?,?,'member')",('member:'+secrets.token_hex(16),generate_password_hash(password))).lastrowid
                 d=date.today().isoformat(); source='Tại quầy' if session.get('role') in ['admin','reception'] else 'Trực tuyến'
                 mid=c.execute('INSERT INTO members(name,gender,birth,phone,email,registered,source,user_id) VALUES(?,?,?,?,?,?,?,?)',(name,f['gender'],birth,phone,email,d,source,uid)).lastrowid
-                c.execute('INSERT INTO invoices(member,months,amount,created) VALUES(?,?,?,?)',(mid,p['months'],p['price'],d)); c.commit()
+                c.execute('INSERT INTO invoices(member,months,amount,created) VALUES(?,?,?,?)',(mid,p['months'],p['price'],d))
+                notify_reception(c,f'Hội viên {name} đã đăng ký tại quầy, gói {p["months"]} tháng chờ thanh toán.','/payments')
+                c.commit()
                 flash(f'Đăng ký thành công. Mã hội viên: {mid}. Hội viên đăng nhập bằng số điện thoại và mật khẩu vừa tạo. '+confirmation(email,name)); return redirect('/register')
             except (ValueError,KeyError,sqlite3.IntegrityError): flash('Thông tin không hợp lệ. Kiểm tra thông tin hội viên và mật khẩu khớp nhau (8–128 ký tự).')
     return render_template('register.html',packages=packages)
@@ -255,6 +295,7 @@ def signup():
                                 ('member:' + secrets.token_hex(16), generate_password_hash(password))).lastrowid
                 c.execute('INSERT INTO members(name,gender,birth,phone,email,registered,source,user_id) VALUES(?,?,?,?,?,?,?,?)',
                           (name,gender,birth,phone,email,date.today().isoformat(),'Trực tuyến',uid))
+                notify_reception(c,f'Hội viên {name} vừa đăng ký tài khoản trực tuyến.','/members')
             flash('Tạo tài khoản thành công! Hãy đăng nhập bằng số điện thoại để chọn gói tập.')
             return redirect('/login')
         except (ValueError, sqlite3.IntegrityError):
@@ -302,7 +343,9 @@ def member_area(page):
                 flash(request_trainer(c,member['id'],request.form.get('trainer','')))
                 return redirect('/account/info')
             if request.form.get('action') == 'cancel_trainer_request':
+                target=c.execute("SELECT trainer FROM trainer_requests WHERE id=? AND member=? AND status='pending'",(request.form.get('request_id',''),member['id'])).fetchone()
                 changed = c.execute("UPDATE trainer_requests SET status='cancelled',responded=? WHERE id=? AND member=? AND status='pending'", (datetime.now().isoformat(),request.form.get('request_id',''),member['id'])).rowcount
+                if changed and target: notify_staff(c,target['trainer'],f"Hội viên {member['name']} đã hủy yêu cầu đăng ký HLV.",'/trainer-requests')
                 flash('Đã hủy yêu cầu HLV.' if changed else 'Yêu cầu không còn ở trạng thái chờ.')
                 return redirect('/account/info')
             if request.form.get('action') == 'email':
@@ -328,6 +371,7 @@ def member_area(page):
                 credit=(old['amount']+old['credit_amount']) if old and package['months']>old['months'] and package['price']>old['amount']+old['credit_amount'] else 0
                 c.execute('INSERT INTO invoices(member,months,amount,created,upgrade_from,credit_amount) VALUES(?,?,?,?,?,?)',
                           (member['id'],package['months'],package['price']-credit,date.today().isoformat(),old['id'] if credit else None,credit))
+                notify_reception(c,f"Hội viên {member['name']} đăng ký gói {package['months']} tháng, đang chờ xác nhận thanh toán.",'/payments')
                 c.commit()
                 flash('Đã đăng ký gói tập. Vui lòng thanh toán tại quầy. '+confirmation(member['email'],member['name']))
             return redirect('/account/packages')
@@ -380,6 +424,7 @@ def cancel_trainer():
                 flash('Đăng ký HLV đã thay đổi. Hãy mở lại trang xác nhận trước khi hủy.')
                 return redirect('/account/info')
             c.execute("UPDATE trainer_requests SET status='cancelled',responded=? WHERE member=? AND trainer=? AND status='accepted'",(datetime.now().isoformat(),member['id'],member['trainer']))
+            notify_staff(c,member['trainer'],f"Hội viên {member['name']} đã hủy đăng ký HLV với bạn.",'/members')
             c.execute('UPDATE members SET trainer=NULL WHERE id=?',(member['id'],))
             c.execute('UPDATE plans SET active=0 WHERE member=? AND active=1',(member['id'],))
             flash('Đã hủy đăng ký HLV và dừng lịch tập hiện tại. Bạn có thể chọn HLV khác; gói Gym và thanh toán được giữ nguyên.')

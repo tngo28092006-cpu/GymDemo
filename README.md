@@ -98,3 +98,7 @@ Hội viên đang có gói còn hiệu lực, chưa có gói trả trước tron
 ### Thông báo hội viên
 
 Chuông trên thanh tài khoản hiển thị 8 thông báo mới nhất và tổng số chưa đọc; trang thông báo hiển thị 100 mục mới nhất. Bấm thông báo để đánh dấu đã đọc và mở trang liên quan; có nút đánh dấu tất cả đã đọc. Dữ liệu lưu trong SQLite và cập nhật khi tải trang. Tạo thông báo khi xác nhận thanh toán gói (admin/lễ tân), HLV nhận hội viên hoặc thêm lịch tập, đổi email, đổi mật khẩu hoặc nhân viên đặt lại mật khẩu. Không lưu mật khẩu trong thông báo. Chỉ hội viên sở hữu mới xem/đánh dấu được thông báo của mình.
+
+### Thông báo nhân viên
+
+Admin và lễ tân nhận thông báo hội viên tạo tài khoản trực tuyến, đăng ký tại quầy hoặc đăng ký gói chờ thanh toán. HLV nhận yêu cầu đăng ký của hội viên, hội viên hủy yêu cầu hoặc hủy HLV đã xác nhận. Chuông, trang lịch sử và trạng thái đã đọc được lưu riêng theo từng tài khoản. Không tạo lại thông báo cho các sự kiện trước khi cập nhật phiên bản này.

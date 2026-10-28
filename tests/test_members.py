@@ -153,6 +153,35 @@ class MemberFlow(unittest.TestCase):
   self.login(password='Reset12345')
   self.assertIn('nhân viên đặt lại thành công',self.c.get('/account/notifications').get_data(as_text=True))
 
+ def test_staff_notification_inboxes_are_private(self):
+  self.signup();self.login()
+  admin=app.test_client();self.login('admin','Gym@12345',admin)
+  hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
+  with db() as c:
+   trainer=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+   peer=c.execute("INSERT INTO users(username,password,role) VALUES(?,?,'trainer')",('peer',generate_password_hash('Gym@12345'))).lastrowid
+  self.post('/account/packages',{'package':1})
+  self.post('/account/info',{'action':'trainer_request','trainer':trainer})
+  self.assertIn('vừa đăng ký tài khoản trực tuyến',admin.get('/notifications').get_data(as_text=True))
+  self.assertIn('đang chờ xác nhận thanh toán',admin.get('/notifications').get_data(as_text=True))
+  self.assertIn('đã gửi yêu cầu đăng ký HLV',hlv.get('/notifications').get_data(as_text=True))
+  with db() as c:
+   nid=c.execute('SELECT id FROM staff_notifications WHERE user_id=?',(trainer,)).fetchone()[0]
+   rid=c.execute('SELECT id FROM trainer_requests').fetchone()[0]
+  self.assertEqual(self.post(f'/notifications/{nid}/read',{},admin).status_code,404)
+  self.assertEqual(self.c.get('/notifications').status_code,403)
+  self.assertEqual(hlv.post(f'/notifications/{nid}/read').status_code,400)
+  peerclient=app.test_client();self.login('peer','Gym@12345',peerclient)
+  self.assertNotIn('đã gửi yêu cầu đăng ký HLV',peerclient.get('/notifications').get_data(as_text=True))
+  self.assertEqual(self.post(f'/notifications/{nid}/read',{},peerclient).status_code,404)
+  self.assertTrue(self.post(f'/notifications/{nid}/read',{},hlv).location.endswith('/trainer-requests'))
+  self.post('/account/info',{'action':'cancel_trainer_request','request_id':rid})
+  self.assertIn('đã hủy yêu cầu đăng ký HLV',hlv.get('/notifications').get_data(as_text=True))
+  self.post('/notifications',{},hlv)
+  with db() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM staff_notifications WHERE user_id=? AND read_at IS NULL',(trainer,)).fetchone()[0],0)
+   self.assertGreater(c.execute('SELECT count(*) FROM staff_notifications WHERE read_at IS NULL').fetchone()[0],0)
+
  def test_account_first_and_payment(self):
   self.assertEqual(self.c.get('/register').status_code,302)
   self.assertEqual(self.signup().status_code,302)
@@ -376,7 +405,7 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(c.execute('SELECT count(*) FROM trainer_requests').fetchone()[0],1)
    rid=c.execute('SELECT id FROM trainer_requests').fetchone()[0]
   hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
-  self.assertNotIn('Hoi Vien A',hlv.get('/members').get_data(as_text=True))
+  self.assertNotIn('Hoi Vien A',hlv.get('/members').get_data(as_text=True).split('<main id="main-content"',1)[1])
   self.assertIn('Xác nhận làm HLV',hlv.get('/trainer-requests').get_data(as_text=True))
   data=dict(member=mid,exercise=1,sets=3,reps=15,days=['2','4','6'])
   self.post('/plans',data,hlv)
