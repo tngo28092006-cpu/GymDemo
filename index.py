@@ -280,8 +280,11 @@ def member_area(page):
                 return redirect('/account/info')
             package = c.execute('SELECT * FROM packages WHERE id=?', (request.form.get('package',''),)).fetchone()
             pending = c.execute('SELECT 1 FROM invoices WHERE member=? AND paid_at IS NULL', (member['id'],)).fetchone()
+            current_months=c.execute('SELECT max(months) FROM invoices WHERE member=? AND (paid_at IS NULL OR expires>?)',(member['id'],date.today().isoformat())).fetchone()[0]
             if not package:
                 flash('Gói tập không hợp lệ.')
+            elif current_months and package['months']<current_months:
+                flash('Không thể đăng ký gói thấp hơn gói hiện tại.')
             elif pending:
                 flash('Bạn đã có hóa đơn chờ thanh toán. Vui lòng liên hệ thu ngân.')
             else:

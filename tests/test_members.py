@@ -87,6 +87,27 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(inv['amount'],1200000);self.assertIsNone(inv['upgrade_from'])
    self.assertEqual(inv['starts'],old_end)
 
+ def test_cannot_register_lower_package_until_current_expires(self):
+  from datetime import date
+  self.signup();self.login();self.post('/account/packages',{'package':2})
+  result=self.post('/account/packages',{'package':1})
+  self.assertIn('Không thể đăng ký gói thấp hơn gói hiện tại.',self.c.get(result.location).get_data(as_text=True))
+  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0],1)
+  staff=app.test_client();self.login('letan','Gym@12345',staff)
+  self.post('/payments',{'invoice':1},staff)
+  for path in ['/account','/account/packages']:
+   result=self.post(path,{'package':1})
+   self.assertIn('Không thể đăng ký gói thấp hơn gói hiện tại.',self.c.get(result.location).get_data(as_text=True))
+  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0],1)
+  self.post('/account/packages',{'package':2})
+  with db() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0],2)
+   c.execute('DELETE FROM invoices WHERE paid_at IS NULL')
+   c.execute('UPDATE invoices SET expires=?',(date.today().isoformat(),))
+  self.post('/account/packages',{'package':1})
+  with db() as c:
+   self.assertEqual(c.execute('SELECT months FROM invoices WHERE paid_at IS NULL').fetchone()[0],1)
+
  def test_account_first_and_payment(self):
   self.assertEqual(self.c.get('/register').status_code,302)
   self.assertEqual(self.signup().status_code,302)
