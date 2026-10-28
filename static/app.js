@@ -39,6 +39,39 @@
             bell.querySelector('summary').focus();
         }
     });
+
+    const readAllForm = bell?.querySelector('[data-mark-notifications-read]');
+    readAllForm?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const button = readAllForm.querySelector('button');
+        button.disabled = true;
+        button.textContent = 'Đang đánh dấu…';
+        bell.querySelector('.notification-read-error')?.remove();
+        try {
+            const response = await fetch(readAllForm.action, {
+                method: 'POST',
+                body: new FormData(readAllForm),
+                credentials: 'same-origin'
+            });
+            if (!response.ok || new URL(response.url).pathname !== new URL(readAllForm.action).pathname) {
+                throw new Error('Cannot mark notifications read');
+            }
+            bell.querySelector('.notification-badge')?.remove();
+            bell.querySelectorAll('.notification-item.unread').forEach(item => item.classList.remove('unread'));
+            bell.querySelector('.notification-heading > span').textContent = '0 chưa đọc';
+            bell.querySelector('summary').setAttribute('aria-label', 'Thông báo, 0 chưa đọc');
+            button.textContent = 'Đã đọc tất cả thông báo';
+        } catch {
+            const error = document.createElement('p');
+            error.className = 'notification-read-error notification-empty';
+            error.setAttribute('role', 'alert');
+            error.textContent = 'Chưa đánh dấu được thông báo. Vui lòng thử lại.';
+            readAllForm.before(error);
+            button.textContent = 'Đọc thông báo';
+        } finally {
+            button.disabled = false;
+        }
+    });
     const menu = document.querySelector('.menu-toggle');
     const sidebar = document.querySelector('.sidebar');
     const overlay = document.querySelector('.sidebar-overlay');
