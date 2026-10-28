@@ -28,7 +28,7 @@ class MemberFlow(unittest.TestCase):
    staff=app.test_client();self.login(role,'Gym@12345',staff)
    page=staff.get('/register').get_data(as_text=True)
    self.assertIn('name="confirm_password"',page)
-   data=dict(name='At counter',gender='Nam',birth=2000,phone=phone,email='',package=1,password='Counter123',confirm_password='wrong')
+   data=dict(name='At counter',gender='Nam',birth=2000,phone=phone,email='counter@example.com',package=1,password='Counter123',confirm_password='wrong')
    self.assertEqual(self.post('/register',data,staff).status_code,200)
    with db() as c:
     self.assertEqual(c.execute('SELECT count(*) FROM members WHERE phone=?',(phone,)).fetchone()[0],0)
@@ -133,7 +133,7 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(c.execute('SELECT count(*) FROM notifications').fetchone()[0],5)
    nid=c.execute('SELECT id FROM notifications LIMIT 1').fetchone()[0]
   other=app.test_client()
-  self.post('/signup',dict(name='Other',phone='0909999999',email='',gender='Nam',birth=2000,password='Member12345',confirm_password='Member12345'),other)
+  self.post('/signup',dict(name='Other',phone='0909999999',email='other@example.com',gender='Nam',birth=2000,password='Member12345',confirm_password='Member12345'),other)
   self.login('0909999999',client=other)
   self.assertEqual(self.post(f'/account/notifications/{nid}/read',{},other).status_code,404)
   self.assertNotIn('đã xếp lịch tập',other.get('/account/notifications').get_data(as_text=True))
@@ -262,14 +262,14 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0],0)
    u=c.execute("SELECT * FROM users WHERE role='member'").fetchone()
    self.assertTrue(check_password_hash(u['password'],'Member12345'))
-  self.assertEqual(self.send.call_count,0)
+  self.assertEqual(self.send.call_count,1)
   self.assertTrue(self.login().location.endswith('/account'))
   for path in ['/account','/signup','/register','/']: self.assertIn(self.c.get(path).status_code,[200,302])
   for path in ['/members','/payments','/plans','/settings']: self.assertEqual(self.c.get(path).status_code,403)
   self.post('/account',{'package':1,'member':999})
   self.post('/account',{'package':1})
   with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0],1)
-  self.assertEqual(self.send.call_count,1)
+  self.assertEqual(self.send.call_count,2)
   staff=app.test_client();self.login('letan','Gym@12345',staff)
   self.post('/payments',{'invoice':1},staff)
   self.assertIn('Đang hoạt động',self.c.get('/account').get_data(as_text=True))
@@ -336,24 +336,36 @@ class MemberFlow(unittest.TestCase):
    other=app.test_client();self.login(user,'Gym@12345',other)
    self.assertEqual(self.post(url,{'confirm':str(mid)},other).status_code,403)
 
- def test_optional_email_and_phone_login(self):
-  self.assertEqual(self.signup(email='').status_code,302)
+ def test_required_email_and_phone_login(self):
+  for email in ['', ' ', 'invalid']:
+   self.assertEqual(self.signup(email=email).status_code,200)
+  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM members').fetchone()[0],0)
+  self.send.assert_not_called()
+  self.assertEqual(self.signup().status_code,302)
+  self.send.assert_called_once_with('a@example.com','Hoi Vien A')
   self.assertEqual(self.login(user='a@example.com').status_code,200)
   self.assertEqual(self.login(user='+84 901-234-567').status_code,302)
-  self.assertIn('Chưa thêm email',self.c.get('/account/info').get_data(as_text=True))
   self.post('/account',{'action':'email','email':'new@gmail.com','member':999})
-  with db() as c:
-   self.assertEqual(c.execute('SELECT email FROM members').fetchone()[0],'new@gmail.com')
-   self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0],0)
-  self.post('/account',{'action':'email','email':'invalid'})
+  for email in ['invalid','']:
+   self.post('/account',{'action':'email','email':email})
   with db() as c: self.assertEqual(c.execute('SELECT email FROM members').fetchone()[0],'new@gmail.com')
-  self.post('/account',{'action':'email','email':''})
-  with db() as c: self.assertEqual(c.execute('SELECT email FROM members').fetchone()[0],'')
-  self.post('/logout',{})
-  self.signup(email='other@gmail.com',phone='+84 901 234 567')
-  with db() as c: self.assertEqual(c.execute("SELECT count(*) FROM users WHERE role='member'").fetchone()[0],1)
-  self.signup(email='',phone='0901234568')
-  with db() as c: self.assertEqual(c.execute("SELECT count(*) FROM users WHERE role='member'").fetchone()[0],2)
+  with db() as c: c.execute("UPDATE members SET email='' ")
+  self.post('/account/packages',{'package':1})
+  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0],0)
+
+ def test_smtp_confirmation_message_is_sent(self):
+  import os
+  config=dict(SMTP_HOST='smtp.example.com',SMTP_PORT='587',SMTP_FROM='gym@example.com',SMTP_USER='gym@example.com',SMTP_PASSWORD='fake-test-secret')
+  with patch.dict(os.environ,config),patch('index.smtplib.SMTP') as smtp:
+   result=real_confirmation('member@example.com','Test Member')
+   connection=smtp.return_value.__enter__.return_value
+   connection.starttls.assert_called_once()
+   connection.login.assert_called_once_with('gym@example.com','fake-test-secret')
+   message=connection.send_message.call_args.args[0]
+   self.assertEqual(message['To'],'member@example.com')
+   self.assertEqual(message['From'],'gym@example.com')
+   self.assertIn('đăng ký hội viên Gym thành công',message.get_content())
+   self.assertIn('Đã gửi email',result)
 
  def test_legacy_email_account_logs_in_by_phone(self):
   self.signup()
@@ -383,7 +395,7 @@ class MemberFlow(unittest.TestCase):
   self.post(f"/members/{old['id']}/delete",{'confirm':str(old['id'])},staff)
   newclient=app.test_client()
   self.c=newclient
-  self.assertEqual(self.signup(email='',name='New Person',phone='+84 901 234 567',password='NewPass123',confirm_password='NewPass123').status_code,302)
+  self.assertEqual(self.signup(email='new@example.com',name='New Person',phone='+84 901 234 567',password='NewPass123',confirm_password='NewPass123').status_code,302)
   self.assertEqual(self.login().status_code,200)  # Old password must not access the new account.
   self.assertEqual(self.login(password='NewPass123').status_code,302)
   page=self.c.get('/account').get_data(as_text=True)

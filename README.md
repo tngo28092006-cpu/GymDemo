@@ -22,7 +22,7 @@ Tài khoản đang có giữ mật khẩu cũ khi cập nhật.
 - Admin: báo cáo, quy định, thanh toán, quản lý hội viên và tạo/xóa HLV; không xếp lịch.
 - Lễ tân: quản lý hội viên, thu tiền, đặt lại mật khẩu hội viên, tạo/xóa HLV.
 - HLV: do admin/lễ tân tạo ở Quản lý HLV, nhận yêu cầu và lập/xóa lịch cho hội viên đã xác nhận.
-- Hội viên: tạo tài khoản tại `/signup`, đăng nhập bằng số điện thoại và mật khẩu; email tùy chọn.
+- Hội viên: tạo tài khoản tại `/signup`, đăng nhập bằng số điện thoại và mật khẩu; email bắt buộc.
 
 Không tạo HLV mặc định trên database mới. HLV cũ được giữ; tài khoản thu ngân cũ chuyển thành quyền lễ tân.
 Tên đăng nhập HLV cần 3–40 ký tự, bắt đầu bằng chữ, có thể chứa số và dấu `.`, `_`, `-`.
@@ -65,7 +65,7 @@ Xóa HLV hủy liên kết/yêu cầu và dừng lịch của hội viên đang 
 Số điện thoại hoặc tên HLV đã xóa có thể tạo tài khoản mới với ID riêng, không nhận dữ liệu cũ.
 Hồ sơ tại quầy chưa gắn tài khoản cần hỗ trợ riêng; chưa có giao diện kích hoạt tài khoản cho hồ sơ cũ.
 
-## SMTP tùy chọn
+## SMTP xác nhận đăng ký
 
 Trong PyCharm > Run > Edit Configurations > Environment variables:
 
@@ -79,7 +79,7 @@ SECRET_KEY=chuoi-ngau-nhien-dai-cua-ban
 ```
 
 Dùng mật khẩu ứng dụng của nhà cung cấp email. Không đưa thông tin SMTP vào code hoặc GitHub.
-Không có email thì bỏ qua SMTP. Chưa cấu hình hoặc gửi lỗi vẫn lưu đăng ký và báo rõ trên giao diện.
+Email hợp lệ bắt buộc khi đăng ký trực tuyến, tại quầy và khi sửa email. Web gọi SMTP ngay sau khi tạo hội viên thành công, và tiếp tục gửi khi đăng ký gói tập. Cần cấu hình SMTP để gửi email thật. Chưa cấu hình hoặc gửi lỗi vẫn lưu đăng ký và báo rõ trên giao diện. Hội viên cũ chưa có email phải bổ sung trước khi đăng ký gói.
 Email chỉ gửi khi đăng ký gói thành công; không gửi khi khởi động hoặc đổi mật khẩu.
 
 ## Giao diện và kiểm tra

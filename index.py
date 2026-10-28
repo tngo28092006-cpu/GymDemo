@@ -442,7 +442,7 @@ def normalize_phone(value):
 
 
 def valid_email(email):
-    return not email or (len(email) <= 254 and re.fullmatch(
+    return bool(email) and (len(email) <= 254 and re.fullmatch(
         r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", email) is not None)
 
 
@@ -470,7 +470,7 @@ def confirmation(email, name):
         msg['From'] = os.environ['SMTP_FROM']
         msg['To'] = email
         msg.set_content(
-            f'Xin chào {name}, đăng ký hội viên của bạn đã được ghi nhận. Vui lòng thanh toán để kích hoạt gói tập.')
+            f'Xin chào {name}, bạn đã đăng ký hội viên Gym thành công. Bạn có thể đăng nhập bằng số điện thoại để xem thông tin và chọn gói tập. Gói tập được kích hoạt sau khi lễ tân xác nhận thanh toán.')
         with smtplib.SMTP(host, int(os.getenv('SMTP_PORT', '587')), timeout=10) as s:
             s.starttls()
             s.login(os.environ['SMTP_USER'], os.environ['SMTP_PASSWORD'])
@@ -546,7 +546,7 @@ def register():
             try:
                 f = request.form
                 name = f['name'].strip()
-                email = f['email'].strip()
+                email = f['email'].strip().lower()
                 phone = normalize_phone(f['phone'])
                 birth = int(f['birth'])
                 password = f.get('password', '')
@@ -579,7 +579,7 @@ def register():
                         email, name))
                 return redirect('/register')
             except (ValueError, KeyError, sqlite3.IntegrityError):
-                flash('Thông tin không hợp lệ. Kiểm tra thông tin hội viên và mật khẩu khớp nhau (8–128 ký tự).')
+                flash('Thông tin không hợp lệ. Email là bắt buộc. Kiểm tra thông tin hội viên và mật khẩu khớp nhau (8–128 ký tự).')
     return render_template('register.html', packages=packages)
 
 
@@ -613,11 +613,11 @@ def signup():
                     'INSERT INTO members(name,gender,birth,phone,email,registered,source,user_id) VALUES(?,?,?,?,?,?,?,?)',
                     (name, gender, birth, phone, email, date.today().isoformat(), 'Trực tuyến', uid))
                 notify_reception(c, f'Hội viên {name} vừa đăng ký tài khoản trực tuyến.', '/members')
-            flash('Tạo tài khoản thành công! Hãy đăng nhập bằng số điện thoại để chọn gói tập.')
+            flash('Tạo tài khoản thành công! Hãy đăng nhập bằng số điện thoại để chọn gói tập. '+confirmation(email,name))
             return redirect('/login')
         except (ValueError, sqlite3.IntegrityError):
             flash(
-                'Không thể tạo tài khoản. Kiểm tra thông tin, số điện thoại đã dùng và mật khẩu khớp nhau (8–128 ký tự).')
+                'Không thể tạo tài khoản. Email là bắt buộc và phải hợp lệ. Kiểm tra số điện thoại và mật khẩu khớp nhau (8–128 ký tự).')
     return render_template('signup.html')
 
 
@@ -683,13 +683,16 @@ def member_area(page):
             if request.form.get('action') == 'email':
                 email = request.form.get('email', '').strip().lower()
                 if not valid_email(email):
-                    flash('Email không hợp lệ. Để trống nếu không muốn thêm email.')
+                    flash('Email là bắt buộc và phải hợp lệ. Không thể bỏ trống email.')
                 else:
                     c.execute('UPDATE members SET email=? WHERE id=?', (email, member['id']))
                     notify_member(c, member['id'],
                                   'Thay đổi email thành công.' if email else 'Đã xóa email khỏi tài khoản.',
                                   '/account/info')
                     flash('Đã cập nhật email.' if email else 'Đã bỏ email khỏi hồ sơ.')
+                return redirect('/account/info')
+            if not valid_email(member['email']):
+                flash('Vui lòng bổ sung email hợp lệ trong Thông tin trước khi đăng ký gói tập.')
                 return redirect('/account/info')
             package = c.execute('SELECT * FROM packages WHERE id=?', (request.form.get('package', ''),)).fetchone()
             pending = c.execute('SELECT 1 FROM invoices WHERE member=? AND paid_at IS NULL', (member['id'],)).fetchone()

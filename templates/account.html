@@ -18,12 +18,12 @@
             </div>
             <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action"
                                                                                            value="email"><label>Email
-                nhận xác nhận <span class="muted">(không bắt buộc)</span><input type="email" name="email"
+                nhận xác nhận <span class="muted">(bắt buộc)</span><input type="email" name="email" required
                                                                                 maxlength="254"
                                                                                 value="{{ member.email or '' }}"
                                                                                 autocomplete="email"
-                                                                                placeholder="Thêm email để nhận xác nhận"></label>
-                <p class="muted"><small>Có thể để trống. Email không dùng để đăng nhập.</small></p>
+                                                                                placeholder="Email nhận xác nhận"></label>
+                <p class="muted"><small>Email dùng để nhận xác nhận đăng ký và không được để trống.</small></p>
                 <div class="account-actions">
                     <button>Lưu email</button>
                     <a class="button" href="/account/password">Đổi mật khẩu</a></div>
@@ -34,7 +34,7 @@
             <div class="account-detail"><span>Số điện thoại đăng nhập</span><strong>{{ member.phone }}</strong></div>
             <div class="account-detail"><span>Ngày tạo hồ sơ</span><strong>{{ (member.registered)|vn_date }}</strong></div>
             <div class="account-detail"><span>Kênh đăng ký</span><strong>{{ member.source }}</strong></div>
-            <p class="muted" style="margin-top:20px"><small>Email là thông tin tùy chọn. Bạn luôn đăng nhập bằng số điện
+            <p class="muted" style="margin-top:20px"><small>Email dùng để nhận xác nhận. Bạn luôn đăng nhập bằng số điện
                 thoại.</small></p><a class="button secondary" href="/account">{{ icon('calendar') }} Xem lịch tập của
                 bạn</a></section>
     </div>{% include 'member_trainer_panel.html' %}{% endblock %}
