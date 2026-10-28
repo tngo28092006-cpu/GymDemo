@@ -17,7 +17,7 @@ def vn_date(value, with_time=False):
     if value is None or value=='': return '—'
     try:
         parsed=value if isinstance(value,(date,datetime)) else datetime.fromisoformat(str(value))
-        return parsed.strftime('%d/%m/%y %H:%M' if with_time else '%d/%m/%y')
+        return parsed.strftime('%d/%m/%Y %H:%M' if with_time else '%d/%m/%Y')
     except (ValueError,TypeError):
         return str(value)
 

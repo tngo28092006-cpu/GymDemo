@@ -113,4 +113,4 @@ Mã hội viên hiển thị HV_XX và HLV hiển thị HLV_XX, ví dụ HV_08 h
 
 ### Ngày hiển thị
 
-Các ngày trên giao diện dùng dd/mm/yy (28/10/26); thời gian thông báo dùng dd/mm/yy HH:mm. Database vẫn lưu ISO để so sánh và tính thời hạn chính xác. Năm sinh vẫn hiển thị đủ bốn chữ số.
+Các ngày trên giao diện dùng dd/mm/yyyy (28/10/2026); thời gian thông báo dùng dd/mm/yyyy HH:mm. Database vẫn lưu ISO để so sánh và tính thời hạn chính xác. Năm sinh vẫn hiển thị đủ bốn chữ số.

@@ -241,15 +241,15 @@ class MemberFlow(unittest.TestCase):
  def test_vietnamese_display_dates_preserve_database_and_birth_year(self):
   from index import vn_date
   from datetime import date
-  self.assertEqual(vn_date('2026-10-28'),'28/10/26')
-  self.assertEqual(vn_date('2028-02-29T09:05:30',True),'29/02/28 09:05')
+  self.assertEqual(vn_date('2026-10-28'),'28/10/2026')
+  self.assertEqual(vn_date('2028-02-29T09:05:30',True),'29/02/2028 09:05')
   self.assertEqual(vn_date(None),'—');self.assertEqual(vn_date('Chưa kích hoạt'),'Chưa kích hoạt')
   self.signup();self.login();self.post('/account/packages',{'package':1})
   staff=app.test_client();self.login('admin','Gym@12345',staff)
   self.post('/payments',{'invoice':1},staff)
   for path in ['/account','/account/info','/account/packages','/account/notifications']:
    page=self.c.get(path).get_data(as_text=True)
-   self.assertIn(date.today().strftime('%d/%m/%y'),page)
+   self.assertIn(date.today().strftime('%d/%m/%Y'),page)
    self.assertNotIn(date.today().isoformat(),page)
   self.assertIn('max="'+str(date.today().year)+'"',staff.get('/register').get_data(as_text=True))
   with db() as c:
@@ -829,7 +829,7 @@ class MemberFlow(unittest.TestCase):
    mid=c.execute('SELECT id FROM members').fetchone()[0]
    c.execute('INSERT INTO invoices(member,months,amount,created,paid_at,starts,expires) VALUES(?,1,500000,?,?,?,?)',(mid,(today-timedelta(days=8)).isoformat(),(today-timedelta(days=8)).isoformat(),(today-timedelta(days=8)).isoformat(),(today+timedelta(days=22)).isoformat()))
   page=self.c.get('/account').get_data(as_text=True)
-  self.assertIn('22<span> ngày</span>',page);self.assertIn((today+timedelta(days=22)).strftime('%d/%m/%y'),page)
+  self.assertIn('22<span> ngày</span>',page);self.assertIn((today+timedelta(days=22)).strftime('%d/%m/%Y'),page)
   self.assertIn('Đang hoạt động',page)
   for delta in [0,-2]:
    with db() as c:c.execute('UPDATE invoices SET expires=?',((today+timedelta(days=delta)).isoformat(),))
