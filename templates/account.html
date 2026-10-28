@@ -32,7 +32,7 @@
         <section class="panel"><h2>Tài khoản của bạn</h2>
             <div class="account-detail"><span>Họ và tên</span><strong>{{ member.name }}</strong></div>
             <div class="account-detail"><span>Số điện thoại đăng nhập</span><strong>{{ member.phone }}</strong></div>
-            <div class="account-detail"><span>Ngày tạo hồ sơ</span><strong>{{ member.registered }}</strong></div>
+            <div class="account-detail"><span>Ngày tạo hồ sơ</span><strong>{{ (member.registered)|vn_date }}</strong></div>
             <div class="account-detail"><span>Kênh đăng ký</span><strong>{{ member.source }}</strong></div>
             <p class="muted" style="margin-top:20px"><small>Email là thông tin tùy chọn. Bạn luôn đăng nhập bằng số điện
                 thoại.</small></p><a class="button secondary" href="/account">{{ icon('calendar') }} Xem lịch tập của

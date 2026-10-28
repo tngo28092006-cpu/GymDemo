@@ -110,3 +110,7 @@ Admin có mục Bảng giá tại /settings, chỉ sửa giá các gói hiện c
 ### Mã quản lý
 
 Mã hội viên hiển thị HV_XX và HLV hiển thị HLV_XX, ví dụ HV_08 hoặc HLV_03. Phần số lấy từ ID hiện có, tối thiểu hai chữ số và không cắt các ID từ 100 trở lên. Không thay khóa dữ liệu hoặc thông tin đăng nhập. Màn hình xóa nhận mã hiển thị; biểu mẫu cũ dùng ID số vẫn được hỗ trợ.
+
+### Ngày hiển thị
+
+Các ngày trên giao diện dùng dd/mm/yy (28/10/26); thời gian thông báo dùng dd/mm/yy HH:mm. Database vẫn lưu ISO để so sánh và tính thời hạn chính xác. Năm sinh vẫn hiển thị đủ bốn chữ số.

@@ -12,6 +12,16 @@ app.config['DATABASE'] = str(Path(__file__).with_name('gym.db'))
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax')
 
 
+@app.template_filter('vn_date')
+def vn_date(value, with_time=False):
+    if value is None or value=='': return '—'
+    try:
+        parsed=value if isinstance(value,(date,datetime)) else datetime.fromisoformat(str(value))
+        return parsed.strftime('%d/%m/%y %H:%M' if with_time else '%d/%m/%y')
+    except (ValueError,TypeError):
+        return str(value)
+
+
 @app.template_filter('member_code')
 def member_code(value):
     return f'HV_{int(value):02d}'
