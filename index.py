@@ -1136,39 +1136,44 @@ def delete_plan(pid):
 def settings():
     with db() as c:
         if request.method == 'POST':
+            if request.form.get('action') != 'price': abort(400)
             try:
-                f = request.form
-                if f['action'] == 'price':
-                    price = int(f['price'])
-                    if price <= 0: raise ValueError()
-                    c.execute('UPDATE packages SET price=? WHERE id=?', (price, f['id']))
-                elif f['action'] == 'limit':
-                    n = int(f['limit'])
-                    if not 1 <= n <= 7: raise ValueError()
-                    for m in c.execute('SELECT DISTINCT member FROM plans WHERE active=1'):
-                        days = set()
-                        for r in c.execute('SELECT days FROM plans WHERE active=1 AND member=?',
-                                           (m['member'],)): days.update(r['days'].split(','))
-                        if len(days) > n: raise ValueError()
-                    c.execute('UPDATE settings SET max_days=? WHERE id=1', (n,))
-                elif f['action'] in ['add', 'edit']:
-                    name = f['name'].strip()
-                    if not name or len(name) > 100: raise ValueError()
-                    if f['action'] == 'add':
-                        c.execute('INSERT INTO exercises(name) VALUES(?)', (name,))
+                price=int(request.form.get('price',''))
+                if price<=0: raise ValueError()
+                changed=c.execute('UPDATE packages SET price=? WHERE id=?',(price,request.form.get('id',''))).rowcount
+                if not changed: raise ValueError()
+                flash('Đã lưu giá mới. Hóa đơn đã lập giữ nguyên giá ban đầu.')
+                return redirect('/settings')
+            except ValueError:
+                flash('Giá không hợp lệ. Chọn gói có sẵn và nhập số tiền lớn hơn 0.')
+        packages=c.execute('SELECT * FROM packages ORDER BY months').fetchall()
+    return render_template('settings.html',packages=packages)
+
+
+@app.route('/exercises',methods=['GET','POST'])
+@require('trainer')
+def manage_exercises():
+    if session['role']!='trainer': abort(403)
+    with db() as c:
+        if request.method=='POST':
+            try:
+                action=request.form.get('action','')
+                if action in ['add','edit']:
+                    name=request.form.get('name','').strip()
+                    if not name or len(name)>100: raise ValueError()
+                    if action=='add':
+                        c.execute('INSERT INTO exercises(name) VALUES(?)',(name,))
                     else:
-                        c.execute('UPDATE exercises SET name=? WHERE id=?', (name, f['id']))
-                elif f['action'] == 'delete':
-                    c.execute('UPDATE exercises SET active=0 WHERE id=?', (f['id'],))
-                else:
-                    raise ValueError()
-                flash('Đã lưu. Giá mới chỉ áp dụng cho hóa đơn tạo sau này.')
-            except (ValueError, sqlite3.IntegrityError):
-                flash('Dữ liệu không hợp lệ hoặc trùng tên. Khi giảm số ngày, hãy sửa lịch đang vượt giới hạn trước.')
-        packages = c.execute('SELECT * FROM packages').fetchall()
-        exercises = c.execute('SELECT * FROM exercises WHERE active=1').fetchall()
-        limit = c.execute('SELECT max_days FROM settings').fetchone()[0]
-    return render_template('settings.html', packages=packages, exercises=exercises, limit=limit)
+                        if not c.execute('UPDATE exercises SET name=? WHERE id=? AND active=1',(name,request.form.get('id',''))).rowcount: raise ValueError()
+                elif action=='delete':
+                    if not c.execute('UPDATE exercises SET active=0 WHERE id=? AND active=1',(request.form.get('id',''),)).rowcount: raise ValueError()
+                else: raise ValueError()
+                flash('Đã cập nhật danh mục bài tập.')
+                return redirect('/exercises')
+            except (ValueError,sqlite3.IntegrityError):
+                flash('Bài tập không hợp lệ hoặc trùng tên. Tên phải có từ 1 đến 100 ký tự.')
+        exercises=c.execute('SELECT * FROM exercises WHERE active=1 ORDER BY name,id').fetchall()
+    return render_template('exercises.html',exercises=exercises)
 
 
 # Flask CLI/PyCharm imports this module without running the __main__ block.
@@ -1177,3 +1182,5 @@ init_db()
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=5000, debug=os.getenv('FLASK_DEBUG') == '1')
+
+

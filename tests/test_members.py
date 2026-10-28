@@ -182,6 +182,41 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(c.execute('SELECT count(*) FROM staff_notifications WHERE user_id=? AND read_at IS NULL',(trainer,)).fetchone()[0],0)
    self.assertGreater(c.execute('SELECT count(*) FROM staff_notifications WHERE read_at IS NULL').fetchone()[0],0)
 
+ def test_admin_prices_and_trainer_exercise_permissions(self):
+  self.signup();self.login();self.post('/account/packages',{'package':1})
+  admin=app.test_client();self.login('admin','Gym@12345',admin)
+  page=admin.get('/settings').get_data(as_text=True)
+  self.assertIn('Bảng giá',page);self.assertNotIn('name="limit"',page);self.assertNotIn('name="name"',page)
+  self.post('/settings',dict(action='price',id=1,price=650000),admin)
+  for action in ['limit','add','edit','delete']:
+   self.assertEqual(self.post('/settings',dict(action=action,id=1,name='Bad',limit=1),admin).status_code,400)
+  with db() as c:
+   self.assertEqual(c.execute('SELECT price FROM packages WHERE id=1').fetchone()[0],650000)
+   self.assertEqual(c.execute('SELECT amount FROM invoices WHERE id=1').fetchone()[0],500000)
+   self.assertEqual(c.execute('SELECT max_days FROM settings').fetchone()[0],6)
+   self.assertEqual(c.execute('SELECT name FROM exercises WHERE id=1').fetchone()[0],'Squat')
+  staff=app.test_client();self.login('letan','Gym@12345',staff)
+  for client in [self.c,admin,staff]:
+   self.assertEqual(client.get('/exercises').status_code,403)
+   self.assertEqual(self.post('/exercises',dict(action='add',name='Bad'),client).status_code,403)
+  hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
+  self.assertEqual(hlv.get('/settings').status_code,403)
+  self.assertEqual(self.post('/settings',dict(action='price',id=1,price=1),hlv).status_code,403)
+  self.assertEqual(self.post('/exercises',dict(action='add',name='Leg press'),hlv).status_code,302)
+  self.post('/exercises',dict(action='add',name='Leg press'),hlv)
+  with db() as c:
+   self.assertEqual(c.execute("SELECT count(*) FROM exercises WHERE name='Leg press'").fetchone()[0],1)
+   eid=c.execute("SELECT id FROM exercises WHERE name='Leg press'").fetchone()[0]
+   mid=c.execute('SELECT id FROM members').fetchone()[0]
+   c.execute("INSERT INTO plans(member,exercise,sets,reps,days) VALUES(?,?,3,10,'2')",(mid,eid))
+  self.post('/exercises',dict(action='edit',id=eid,name='Leg press machine'),hlv)
+  self.post('/exercises',dict(action='delete',id=eid),hlv)
+  with db() as c:
+   item=c.execute('SELECT * FROM exercises WHERE id=?',(eid,)).fetchone()
+   self.assertEqual(item['name'],'Leg press machine');self.assertEqual(item['active'],0)
+   self.assertEqual(c.execute('SELECT count(*) FROM plans WHERE exercise=?',(eid,)).fetchone()[0],1)
+  self.assertNotIn('Leg press machine',hlv.get('/plans').get_data(as_text=True))
+
  def test_account_first_and_payment(self):
   self.assertEqual(self.c.get('/register').status_code,302)
   self.assertEqual(self.signup().status_code,302)

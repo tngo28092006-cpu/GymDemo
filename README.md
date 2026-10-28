@@ -102,3 +102,7 @@ Chuông trên thanh tài khoản hiển thị 8 thông báo mới nhất và t�
 ### Thông báo nhân viên
 
 Admin và lễ tân nhận thông báo hội viên tạo tài khoản trực tuyến, đăng ký tại quầy hoặc đăng ký gói chờ thanh toán. HLV nhận yêu cầu đăng ký của hội viên, hội viên hủy yêu cầu hoặc hủy HLV đã xác nhận. Chuông, trang lịch sử và trạng thái đã đọc được lưu riêng theo từng tài khoản. Không tạo lại thông báo cho các sự kiện trước khi cập nhật phiên bản này.
+
+### Phân quyền bảng giá và bài tập
+
+Admin có mục Bảng giá tại /settings, chỉ sửa giá các gói hiện có; không quản lý bài tập hay thay đổi giới hạn ngày tập tại đây. HLV có mục Bài tập tại /exercises để thêm, sửa tên, ẩn bài tập trong danh mục dùng chung. Admin, lễ tân và hội viên không truy cập được chức năng này. Bài tập đã ẩn không xuất hiện khi lập lịch mới, lịch đã xếp vẫn được giữ.
