@@ -24,6 +24,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS packages(id INTEGER PRIMARY KEY, months INTEGER UNIQUE, price INTEGER CHECK(price>0));
         CREATE TABLE IF NOT EXISTS members(id INTEGER PRIMARY KEY, name TEXT, gender TEXT, birth INTEGER, phone TEXT, email TEXT, registered TEXT, source TEXT, trainer INTEGER REFERENCES users(id));
         CREATE TABLE IF NOT EXISTS invoices(id INTEGER PRIMARY KEY, member INTEGER REFERENCES members(id), months INTEGER, amount INTEGER, created TEXT, paid_at TEXT, starts TEXT, expires TEXT);
+        CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, member INTEGER NOT NULL REFERENCES members(id), message TEXT NOT NULL, link TEXT NOT NULL, created TEXT NOT NULL, read_at TEXT);
+        CREATE INDEX IF NOT EXISTS notifications_member ON notifications(member,id);
         CREATE TABLE IF NOT EXISTS exercises(id INTEGER PRIMARY KEY, name TEXT UNIQUE, active INTEGER DEFAULT 1);
         CREATE TABLE IF NOT EXISTS plans(id INTEGER PRIMARY KEY, member INTEGER REFERENCES members(id), exercise INTEGER REFERENCES exercises(id), sets INTEGER, reps INTEGER, days TEXT);
         CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), max_days INTEGER);
@@ -96,11 +98,44 @@ def csrf():
 @app.context_processor
 def context():
     member_name=None
+    notifications=[];unread_notifications=0
     if session.get('role')=='member':
         with db() as c:
             row=c.execute('SELECT name FROM members WHERE user_id=? AND deleted_at IS NULL',(session.get('uid'),)).fetchone()
             member_name=row['name'] if row else None
-    return dict(today=date.today().isoformat(),role=session.get('role'),csrf=session.get('csrf'),member_name=member_name)
+            if row:
+                notifications=c.execute('SELECT n.* FROM notifications n JOIN members m ON m.id=n.member WHERE m.user_id=? AND m.deleted_at IS NULL ORDER BY n.id DESC LIMIT 8',(session['uid'],)).fetchall()
+                unread_notifications=c.execute('SELECT count(*) FROM notifications n JOIN members m ON m.id=n.member WHERE m.user_id=? AND m.deleted_at IS NULL AND n.read_at IS NULL',(session['uid'],)).fetchone()[0]
+    return dict(today=date.today().isoformat(),role=session.get('role'),csrf=session.get('csrf'),member_name=member_name,notifications=notifications,unread_notifications=unread_notifications)
+
+def notify_member(c, member_id, message, link):
+    c.execute('INSERT INTO notifications(member,message,link,created) VALUES(?,?,?,?)',(member_id,message,link,datetime.now().isoformat(timespec='seconds')))
+
+
+@app.route('/account/notifications',methods=['GET','POST'])
+@require('member')
+def member_notifications():
+    if session['role']!='member': abort(403)
+    with db() as c:
+        member=c.execute('SELECT id FROM members WHERE user_id=? AND deleted_at IS NULL',(session['uid'],)).fetchone()
+        if not member: abort(403)
+        if request.method=='POST':
+            c.execute('UPDATE notifications SET read_at=? WHERE member=? AND read_at IS NULL',(datetime.now().isoformat(timespec='seconds'),member['id']))
+            return redirect('/account/notifications')
+        rows=c.execute('SELECT * FROM notifications WHERE member=? ORDER BY id DESC LIMIT 100',(member['id'],)).fetchall()
+    return render_template('notifications.html',rows=rows)
+
+
+@app.post('/account/notifications/<int:nid>/read')
+@require('member')
+def read_notification(nid):
+    if session['role']!='member': abort(403)
+    with db() as c:
+        item=c.execute('SELECT n.* FROM notifications n JOIN members m ON m.id=n.member WHERE n.id=? AND m.user_id=? AND m.deleted_at IS NULL',(nid,session['uid'])).fetchone()
+        if not item: abort(404)
+        c.execute('UPDATE notifications SET read_at=coalesce(read_at,?) WHERE id=?',(datetime.now().isoformat(timespec='seconds'),nid))
+    return redirect(item['link'] if item['link'] in ['/account','/account/info','/account/packages'] else '/account')
+
 
 def add_months(d,n):
     m=d.month-1+n; y=d.year+m//12; m=m%12+1
@@ -276,6 +311,7 @@ def member_area(page):
                     flash('Email không hợp lệ. Để trống nếu không muốn thêm email.')
                 else:
                     c.execute('UPDATE members SET email=? WHERE id=?', (email, member['id']))
+                    notify_member(c,member['id'],'Thay đổi email thành công.' if email else 'Đã xóa email khỏi tài khoản.','/account/info')
                     flash('Đã cập nhật email.' if email else 'Đã bỏ email khỏi hồ sơ.')
                 return redirect('/account/info')
             package = c.execute('SELECT * FROM packages WHERE id=?', (request.form.get('package',''),)).fetchone()
@@ -370,6 +406,8 @@ def change_password():
             else:
                 c.execute('UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',
                           (generate_password_hash(password), user['id']))
+                target=c.execute('SELECT id FROM members WHERE user_id=?',(user['id'],)).fetchone()
+                notify_member(c,target['id'],'Thay đổi mật khẩu thành công.','/account/info')
                 session.clear()
                 flash('Đổi mật khẩu thành công. Vui lòng đăng nhập lại bằng mật khẩu mới.')
                 return redirect('/login')
@@ -394,6 +432,7 @@ def reset_member_password(mid):
             else:
                 c.execute('UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',
                           (generate_password_hash(password), member['user_id']))
+                notify_member(c,mid,'Mật khẩu của bạn đã được nhân viên đặt lại thành công.','/account/info')
                 flash(f"Đã đặt lại mật khẩu cho hội viên #{mid}. Các phiên đăng nhập cũ đã bị đăng xuất.")
                 return redirect('/members')
     return render_template('password.html', member=member)
@@ -520,6 +559,8 @@ def respond_trainer_request(rid):
             c.execute('UPDATE trainer_requests SET status=?,responded=? WHERE id=?',(status,datetime.now().isoformat(),rid))
             if decision == 'accept':
                 c.execute('UPDATE members SET trainer=? WHERE id=?',(session['uid'],item['member']))
+                trainer=c.execute('SELECT full_name,username FROM users WHERE id=?',(session['uid'],)).fetchone()
+                notify_member(c,item['member'],f"HLV {trainer['full_name'] or trainer['username']} đã xác nhận làm huấn luyện viên cho bạn.",'/account/info')
             flash('Đã xác nhận. Bạn có thể lập lịch cho hội viên.' if decision=='accept' else 'Đã từ chối yêu cầu.')
     return redirect('/trainer-requests')
 
@@ -562,7 +603,9 @@ def payments():
                         return redirect('/payments')
                     start=d
                     c.execute('UPDATE invoices SET original_expires=expires,expires=? WHERE id=?',(d.isoformat(),old['id']))
-                c.execute('UPDATE invoices SET paid_at=?,starts=?,expires=? WHERE id=? AND paid_at IS NULL',(d.isoformat(),start.isoformat(),add_months(start,inv['months']).isoformat(),inv['id'])); flash('Đã xác nhận thu tiền, kích hoạt gói tập.')
+                c.execute('UPDATE invoices SET paid_at=?,starts=?,expires=? WHERE id=? AND paid_at IS NULL',(d.isoformat(),start.isoformat(),add_months(start,inv['months']).isoformat(),inv['id']))
+                notify_member(c,inv['member'],f"Gói tập {inv['months']} tháng của bạn đã được đăng ký thành công và xác nhận thanh toán.",'/account')
+                flash('Đã xác nhận thu tiền, kích hoạt gói tập.')
         rows=c.execute('SELECT i.*,m.name FROM invoices i JOIN members m ON m.id=i.member ORDER BY i.id DESC').fetchall()
     return render_template('payments.html',rows=rows)
 
@@ -597,6 +640,8 @@ def plans():
                     or not c.execute('SELECT 1 FROM exercises WHERE id=? AND active=1',(eid,)).fetchone()):
                     raise ValueError()
                 c.execute('INSERT INTO plans(member,exercise,sets,reps,days) VALUES(?,?,?,?,?)',(mid,eid,sets,reps,','.join(days)))
+                exercise=c.execute('SELECT name FROM exercises WHERE id=?',(eid,)).fetchone()
+                notify_member(c,mid,f"HLV đã xếp lịch tập cho bạn: {exercise['name']}.",'/account')
                 flash('Đã thêm bài tập cho hội viên đã được HLV xác nhận.')
                 return redirect(url_for('plans', member=mid))
             except (ValueError,KeyError):

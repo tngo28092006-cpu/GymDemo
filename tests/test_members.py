@@ -108,6 +108,51 @@ class MemberFlow(unittest.TestCase):
   with db() as c:
    self.assertEqual(c.execute('SELECT months FROM invoices WHERE paid_at IS NULL').fetchone()[0],1)
 
+ def test_member_notifications_events_and_read_privacy(self):
+  self.signup();self.login();self.post('/account/packages',{'package':1})
+  staff=app.test_client();self.login('admin','Gym@12345',staff)
+  self.post('/payments',{'invoice':1},staff);self.post('/payments',{'invoice':1},staff)
+  with db() as c:
+   trainer=c.execute("SELECT id FROM users WHERE username='hlv'").fetchone()[0]
+   mid=c.execute('SELECT id FROM members').fetchone()[0]
+  self.post('/account/info',{'action':'trainer_request','trainer':trainer})
+  hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
+  with db() as c: rid=c.execute('SELECT id FROM trainer_requests').fetchone()[0]
+  self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'},hlv)
+  self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'},hlv)
+  self.post('/plans',dict(member=mid,exercise=1,sets=3,reps=15,days=['2']),hlv)
+  self.post('/account/info',{'action':'email','email':'bad'})
+  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM notifications').fetchone()[0],3)
+  self.post('/account/info',{'action':'email','email':'new@example.com'})
+  self.post('/account/password',dict(current_password='Member12345',password='Changed123',confirm_password='Changed123'))
+  self.login(password='Changed123')
+  page=self.c.get('/account/notifications').get_data(as_text=True)
+  for message in ['xác nhận thanh toán','đã xác nhận làm huấn luyện viên','đã xếp lịch tập','Thay đổi email thành công','Thay đổi mật khẩu thành công']:
+   self.assertIn(message,page)
+  with db() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM notifications').fetchone()[0],5)
+   nid=c.execute('SELECT id FROM notifications LIMIT 1').fetchone()[0]
+  other=app.test_client()
+  self.post('/signup',dict(name='Other',phone='0909999999',email='',gender='Nam',birth=2000,password='Member12345',confirm_password='Member12345'),other)
+  self.login('0909999999',client=other)
+  self.assertEqual(self.post(f'/account/notifications/{nid}/read',{},other).status_code,404)
+  self.assertNotIn('đã xếp lịch tập',other.get('/account/notifications').get_data(as_text=True))
+  self.assertEqual(self.c.get(f'/account/notifications/{nid}/read').status_code,405)
+  self.assertEqual(self.c.post(f'/account/notifications/{nid}/read').status_code,400)
+  self.post(f'/account/notifications/{nid}/read',{})
+  with db() as c: self.assertIsNotNone(c.execute('SELECT read_at FROM notifications WHERE id=?',(nid,)).fetchone()[0])
+  self.post('/account/notifications',{})
+  with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM notifications WHERE read_at IS NULL').fetchone()[0],0)
+  self.assertEqual(staff.get('/account/notifications').status_code,403)
+
+ def test_staff_password_reset_notifies_member(self):
+  self.signup()
+  staff=app.test_client();self.login('letan','Gym@12345',staff)
+  with db() as c: mid=c.execute('SELECT id FROM members').fetchone()[0]
+  self.post(f'/members/{mid}/password',dict(current_password='Gym@12345',password='Reset12345',confirm_password='Reset12345'),staff)
+  self.login(password='Reset12345')
+  self.assertIn('nhân viên đặt lại thành công',self.c.get('/account/notifications').get_data(as_text=True))
+
  def test_account_first_and_payment(self):
   self.assertEqual(self.c.get('/register').status_code,302)
   self.assertEqual(self.signup().status_code,302)
@@ -452,7 +497,7 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(c.execute('SELECT status FROM trainer_requests').fetchone()[0],'cancelled')
    self.assertEqual(c.execute('SELECT active FROM plans').fetchone()[0],0)
    self.assertEqual(tuple(c.execute('SELECT * FROM invoices').fetchone()),invoice)
-  self.assertNotIn('Squat',self.c.get('/account').get_data(as_text=True))
+  self.assertNotIn('Squat',self.c.get('/account').get_data(as_text=True).split('<main id="main-content"',1)[1])
   self.post('/plans',dict(member=mid,exercise=1,sets=3,reps=15,days=['2']),hlv)
   self.post('/plans/1/delete',{},hlv)
   with db() as c: self.assertEqual(c.execute('SELECT count(*) FROM plans').fetchone()[0],1)
@@ -464,7 +509,8 @@ class MemberFlow(unittest.TestCase):
   with db() as c: self.assertEqual(c.execute('SELECT trainer FROM members').fetchone()[0],peer)
   self.assertEqual(self.post('/plans',dict(member=mid,exercise=2,sets=3,reps=15,days=['3']),hlv2).status_code,302)
   page=self.c.get('/account').get_data(as_text=True)
-  self.assertIn('Bench press',page);self.assertNotIn('Squat',page)
+  schedule=page.split('<main id="main-content"',1)[1]
+  self.assertIn('Bench press',schedule);self.assertNotIn('Squat',schedule)
 
  def test_cannot_cancel_another_members_trainer(self):
   self.signup();self.signup(phone='0901234568',email='b@example.com')

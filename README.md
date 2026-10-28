@@ -94,3 +94,7 @@ Trước triển khai công khai cần bổ sung HTTPS, bảo vệ đăng nhập
 ### Nâng gói trong 3 ngày đầu
 
 Hội viên đang có gói còn hiệu lực, chưa có gói trả trước trong tương lai, được nâng sang gói dài hơn và có giá cao hơn trong 0–3 ngày kể từ ngày lập hóa đơn gói hiện tại. Giá trị gói cũ (kể cả khoản đã khấu trừ từ lần nâng trước) được trừ khỏi giá gói mới. Giá và khoản khấu trừ được chốt khi lập hóa đơn, không nhận từ trình duyệt. Khi lễ tân xác nhận khoản chênh lệch, gói mới bắt đầu đủ số tháng từ ngày xác nhận; gói cũ kết thúc và lưu hạn cũ trong lịch sử. Không cộng thêm ngày còn lại của gói cũ. Ngoài điều kiện trên, đăng ký là gia hạn theo cơ chế cũ. Doanh thu chỉ cộng tiền thực thu.
+
+### Thông báo hội viên
+
+Chuông trên thanh tài khoản hiển thị 8 thông báo mới nhất và tổng số chưa đọc; trang thông báo hiển thị 100 mục mới nhất. Bấm thông báo để đánh dấu đã đọc và mở trang liên quan; có nút đánh dấu tất cả đã đọc. Dữ liệu lưu trong SQLite và cập nhật khi tải trang. Tạo thông báo khi xác nhận thanh toán gói (admin/lễ tân), HLV nhận hội viên hoặc thêm lịch tập, đổi email, đổi mật khẩu hoặc nhân viên đặt lại mật khẩu. Không lưu mật khẩu trong thông báo. Chỉ hội viên sở hữu mới xem/đánh dấu được thông báo của mình.

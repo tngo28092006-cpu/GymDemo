@@ -12,6 +12,9 @@
     dialog.addEventListener('close',()=>{dialog.remove();document.querySelector('.package-card button:not(:disabled)')?.focus();});
     dialog.showModal();notice.remove();
   });
+  const bell=document.querySelector('.notification-bell');
+  document.addEventListener('click',event=>{if(bell&&!bell.contains(event.target))bell.open=false;});
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&bell?.open){bell.open=false;bell.querySelector('summary').focus();}});
   const menu = document.querySelector('.menu-toggle');
   const sidebar = document.querySelector('.sidebar');
   const overlay = document.querySelector('.sidebar-overlay');
