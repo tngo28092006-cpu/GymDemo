@@ -154,3 +154,15 @@ Sau đăng nhập, HLV thấy bảng Lịch đã xếp: hội viên, bài tập,
 Chỉ hiển thị lịch đang hoạt động của người đã được chính HLV đó xác nhận.
 Không hiển thị hoặc truy vấn dữ liệu doanh thu/đăng ký theo tháng trên trang chính HLV.
 Admin/lễ tân vẫn xem Tổng quan thống kê như trước. Trang Lịch tập vẫn dùng để thêm/xóa bài tập.
+
+
+## Giao diện mới
+- Thanh điều hướng bên trái theo vai trò, đánh dấu màn hình đang mở; menu thu gọn trên điện thoại.
+- Trang đăng nhập/đăng ký với hướng dẫn rõ ràng, nút hiện/ẩn mật khẩu và thông báo lỗi dễ nhận biết.
+- Tổng quan admin/lễ tân có thẻ số liệu và biểu đồ; HLV vẫn chỉ thấy lịch đã xếp của mình.
+- Trang cá nhân có thẻ hội viên, chọn gói bằng thẻ radio và trạng thái yêu cầu HLV.
+- Tìm nhanh trong bảng, hỗ trợ gõ không dấu, số kết quả và trạng thái không tìm thấy.
+- Bảng cuộn ngang trên điện thoại; hỗ trợ bàn phím, tiêu điểm rõ, liên kết bỏ qua điều hướng.
+- Không cần Node hoặc bước build mới; chạy Flask như trước. CSS/JS nằm trong static.
+- Biểu đồ vẫn dùng Chart.js từ CDN; khi không tải được, mở bảng số liệu chi tiết bên dưới.
+- Sau khi pull, dừng/chạy lại Flask và nhấn Ctrl+F5 trên trình duyệt để tải CSS/JS mới.
