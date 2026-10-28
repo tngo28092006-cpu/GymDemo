@@ -1,168 +1,92 @@
-# Quản lý phòng tập Gym — bản thử nghiệm Flask
+# GYM / CNPM — Quản lý phòng tập
 
-## Chạy trong PyCharm (Python 3.10 trở lên)
-1. Giải nén rồi mở thư mục gym_demo trong PyCharm.
-2. Chọn Python interpreter/virtual environment cho dự án.
-3. Mở Terminal: `python -m pip install -r requirements.txt`
-4. Nhấp phải index.py > Run, hoặc chạy `python index.py`.
-5. Mở http://127.0.0.1:5000. Không mở index.html trực tiếp.
+Ứng dụng thử nghiệm Flask + SQLite, giao diện tiếng Việt, dùng trong PyCharm.
 
-SQLite gym.db tự tạo khi chạy index.py lần đầu. Khởi động lại không mất dữ liệu.
+## Chạy lần đầu
 
-## Tài khoản mẫu
-Mật khẩu chung ban đầu: Gym@12345
-- admin: quản lý, báo cáo, quy định, tạo tài khoản HLV; không xếp lịch tập
-- letan: quản lý hội viên, gửi yêu cầu HLV, thu tiền và đặt lại mật khẩu hội viên
-- HLV: do admin hoặc lễ tân tạo tại Quản lý HLV, nhận yêu cầu và lập/xóa lịch được phân công
-Đăng ký tài khoản trực tuyến: http://127.0.0.1:5000/signup.
-Có thể đặt biến môi trường DEMO_PASSWORD trước lần chạy đầu để đổi mật khẩu khởi tạo.
+1. Mở thư mục dự án bằng PyCharm, chọn Python interpreter (Python 3.10 trở lên).
+2. Trong Terminal: `python -m pip install -r requirements.txt`.
+3. Run `index.py`, hoặc chạy `python index.py`. Cấu hình Flask của PyCharm (`flask run`) cũng được hỗ trợ.
+4. Mở http://127.0.0.1:5000.
 
-## Kịch bản chạy thử
-1. Tạo tài khoản tại /signup, đăng nhập rồi chọn gói tại /account.
-2. Admin/lễ tân vào Quản lý HLV để tạo tài khoản; hội viên chọn HLV đó tại trang cá nhân và gửi yêu cầu.
-3. Đăng nhập admin hoặc letan, vào Thanh toán, xác nhận đã thu tiền.
-4. Đăng nhập tài khoản HLV vừa tạo, vào Yêu cầu HLV và xác nhận, sau đó tạo Squat, 3 hiệp, 15 lần, Thứ 2/4/6.
-5. Xem Tổng quan: hội viên còn hạn, đăng ký và doanh thu theo tháng trong năm hiện tại.
-6. Admin vào Quy định để đổi giá, thêm/sửa/xóa bài tập và giới hạn ngày tập.
+Không mở các file HTML trực tiếp. Database `gym.db` tự tạo/cập nhật khi khởi động; chạy lại không mất dữ liệu.
+Không cần Node hay bước build. Sau cập nhật, chạy lại Flask và nhấn Ctrl+F5 để tải CSS/JS mới.
+Sao lưu `gym.db` trước nâng cấp; không xóa file này hoặc đưa dữ liệu hội viên lên GitHub.
 
-## Quy ước
-- Hóa đơn lập khi đăng ký, lưu giá tại thời điểm lập. Đổi giá không sửa hóa đơn cũ.
-- Chỉ hóa đơn đã thu tiền mới tính doanh thu; tháng tính theo ngày thu tiền.
-- Gói tập bắt đầu khi thu tiền; hết hạn theo tháng lịch, ngày hết hạn không còn hiệu lực.
-- Tổng số ngày KHÁC NHAU trong mọi bài tập của một hội viên không vượt giới hạn.
-- Giảm giới hạn bị chặn nếu lịch hiện tại vượt mức mới: sửa/xóa lịch trước.
-- Xóa danh mục là ẩn bài tập, giữ lịch tập đã tạo.
-- Bản thử nghiệm chưa có hoàn tiền, xuất hóa đơn PDF hoặc quản lý đầy đủ tài khoản nhân viên ngoài việc tạo HLV. Mỗi lần đăng ký mới tạo một hội viên mới. Lịch sử thanh toán thể hiện trong bảng hóa đơn theo mã hội viên.
+## Tài khoản và vai trò
 
-## Email SMTP (tùy chọn)
-Trong PyCharm: Run > Edit Configurations > Environment variables, thêm:
+Database mới tạo `admin` và `letan`, mật khẩu mặc định `Gym@12345`.
+Có thể đặt biến môi trường `DEMO_PASSWORD` trước lần chạy đầu để thay mật khẩu khởi tạo.
+Tài khoản đang có giữ mật khẩu cũ khi cập nhật.
+
+- Admin: báo cáo, quy định, thanh toán, quản lý hội viên và tạo/xóa HLV; không xếp lịch.
+- Lễ tân: quản lý hội viên, thu tiền, đặt lại mật khẩu hội viên, tạo/xóa HLV.
+- HLV: do admin/lễ tân tạo ở Quản lý HLV, nhận yêu cầu và lập/xóa lịch cho hội viên đã xác nhận.
+- Hội viên: tạo tài khoản tại `/signup`, đăng nhập bằng số điện thoại và mật khẩu; email tùy chọn.
+
+Không tạo HLV mặc định trên database mới. HLV cũ được giữ; tài khoản thu ngân cũ chuyển thành quyền lễ tân.
+Tên đăng nhập HLV cần 3–40 ký tự, bắt đầu bằng chữ, có thể chứa số và dấu `.`, `_`, `-`.
+Mật khẩu 8–128 ký tự, lưu dạng băm. Không hiển thị mật khẩu đã lưu.
+
+## Ba trang hội viên
+
+- **Trang chủ** (`/account`): lịch tập đang hoạt động, gói đang dùng, ngày đăng ký gói, ngày bắt đầu, ngày hết hạn và số ngày còn lại.
+- **Thông tin** (`/account/info`): hồ sơ, ngày tạo tài khoản, email, đổi mật khẩu và đăng ký/hủy HLV.
+- **Đăng ký gói tập** (`/account/packages`): danh mục gói, đăng ký/gia hạn và lịch sử hóa đơn.
+
+Ngày đăng ký gói là ngày lập hóa đơn, khác ngày tạo hồ sơ tài khoản.
+Số ngày còn lại = ngày hết hạn trừ ngày hiện tại, không âm; ngày hết hạn là ngày đầu tiên không còn hiệu lực.
+Gói chưa thanh toán hiện Chờ kích hoạt, chưa tính ngày; gói tương lai hiện Chưa đến ngày bắt đầu.
+Tạo tài khoản chưa tạo hóa đơn. Mỗi hội viên chỉ có một hóa đơn chờ; giá đã lập được giữ nguyên.
+Hóa đơn thanh toán xong mới kích hoạt gói và tính doanh thu; gói gia hạn bắt đầu sau gói đã thanh toán trước đó.
+Các POST `/account` cũ vẫn được hỗ trợ và chuyển về trang liên quan.
+
+## Luồng HLV
+
+1. Admin/lễ tân tạo tài khoản HLV tại Quản lý HLV.
+2. Hội viên vào Thông tin, chọn HLV và gửi yêu cầu; lễ tân/admin cũng có thể hỗ trợ gửi tại quầy.
+3. HLV vào Yêu cầu HLV để xác nhận hoặc từ chối. Chỉ HLV được chọn mới xử lý yêu cầu.
+4. Sau xác nhận, hội viên xuất hiện trong danh sách riêng của HLV và mới được xếp lịch.
+5. Hội viên được hủy yêu cầu chờ hoặc hủy đăng ký đã được nhận qua trang xác nhận.
+
+Hủy đăng ký đã nhận sẽ bỏ liên kết và ngừng lịch hiện tại, giữ lịch sử, gói Gym và hóa đơn.
+Hội viên có thể chọn HLV mới và chờ xác nhận mới. HLV chỉ xem và xếp lịch cho hội viên của mình.
+Trang chính HLV là bảng lịch đã xếp, không có doanh thu hoặc biểu đồ đăng ký theo tháng.
+Quy định ngày tập áp dụng trên tổng số ngày khác nhau của mọi bài tập đang hoạt động mỗi hội viên.
+
+## Mật khẩu và xóa hồ sơ
+
+Hội viên vào Thông tin > Đổi mật khẩu, cần mật khẩu hiện tại.
+Admin/lễ tân đặt lại mật khẩu hội viên ở Hội viên, xác nhận bằng mật khẩu của chính nhân viên thao tác.
+Đổi/reset mật khẩu chặn mọi phiên cũ ở lần truy cập tiếp theo.
+
+Xóa hội viên/HLV có trang xác nhận. Hồ sơ được ẩn/khóa thay vì xóa lịch sử thanh toán.
+Xóa HLV hủy liên kết/yêu cầu và dừng lịch của hội viên đang thuộc HLV đó; các HLV khác không bị ảnh hưởng.
+Số điện thoại hoặc tên HLV đã xóa có thể tạo tài khoản mới với ID riêng, không nhận dữ liệu cũ.
+Hồ sơ tại quầy chưa gắn tài khoản cần hỗ trợ riêng; chưa có giao diện kích hoạt tài khoản cho hồ sơ cũ.
+
+## SMTP tùy chọn
+
+Trong PyCharm > Run > Edit Configurations > Environment variables:
+
+```text
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_FROM=email-cua-ban@gmail.com
 SMTP_USER=email-cua-ban@gmail.com
 SMTP_PASSWORD=mat-khau-ung-dung
 SECRET_KEY=chuoi-ngau-nhien-dai-cua-ban
+```
 
-Dùng mật khẩu ứng dụng của nhà cung cấp email. Không ghi mật khẩu vào code hoặc đẩy lên GitHub.
-Khi không cấu hình SMTP hoặc gửi lỗi: hội viên vẫn được lưu, giao diện báo rõ chưa gửi.
-Email chỉ gửi sau đăng ký, không gửi lúc khởi động. Chỉ dùng địa chỉ bạn có quyền thử nghiệm.
-Biểu đồ Chart.js tải từ CDN nên cần Internet; bảng số liệu luôn có để đối chiếu.
+Dùng mật khẩu ứng dụng của nhà cung cấp email. Không đưa thông tin SMTP vào code hoặc GitHub.
+Không có email thì bỏ qua SMTP. Chưa cấu hình hoặc gửi lỗi vẫn lưu đăng ký và báo rõ trên giao diện.
+Email chỉ gửi khi đăng ký gói thành công; không gửi khi khởi động hoặc đổi mật khẩu.
 
-## Giới hạn triển khai
-Đây là bản chạy thử trên localhost, không phải hệ thống sẵn sàng triển khai công khai.
-Có phân quyền phía server, băm mật khẩu, CSRF và SQL tham số hóa.
-Trước triển khai thật cần quản lý tài khoản/mật khẩu, giới hạn đăng nhập, HTTPS, sao lưu,
-xử lý email nền và kiểm tra dữ liệu email/điện thoại đầy đủ hơn.
-Không đưa gym.db chứa thông tin hội viên lên GitHub.
+## Giao diện và kiểm tra
 
+Sidebar theo vai trò, menu co gọn trên điện thoại, bảng cuộn trong khung và tìm nhanh hỗ trợ không dấu.
+Biểu đồ dùng Chart.js từ CDN; khi không tải được, mở bảng số liệu chi tiết để xem.
+Kiểm tra: `python -m unittest discover -s tests -v`.
 
-## Tài khoản hội viên (luồng mới)
-1. Mở /signup: nhập hồ sơ, số điện thoại, mật khẩu và xác nhận mật khẩu.
-2. Tạo tài khoản chỉ tạo hồ sơ, chưa tạo hóa đơn hay kích hoạt gói tập.
-3. Đăng nhập bằng số điện thoại ở /login, chọn gói trên /account.
-4. Lễ tân xác nhận thanh toán; hội viên xem hạn gói, HLV, lịch tập và hóa đơn riêng.
-5. Chỉ được có một hóa đơn chờ thanh toán; có thể mua tiếp/gia hạn sau khi hóa đơn được thu.
-
-/register chỉ dành cho lễ tân/admin đăng ký tại quầy; người chưa đăng nhập phải tạo tài khoản trước.
-Dữ liệu cũ được giữ khi chạy lại index.py: tự thêm cột liên kết tài khoản và chỉ mục duy nhất.
-Hồ sơ cũ không tự gắn tài khoản mới theo số điện thoại. Nếu số điện thoại đã có hồ sơ,
-đăng ký tài khoản bị chặn và yêu cầu liên hệ lễ tân. Luồng kích hoạt tài khoản cho hồ sơ cũ chưa có giao diện.
-Không xóa gym.db khi cập nhật. Sao lưu gym.db trước khi nâng cấp.
-Thống kê đăng ký hội viên tính theo ngày tạo hồ sơ tài khoản; doanh thu chỉ tính sau khi thu tiền.
-Email SMTP được gửi khi chọn gói thành công, không gửi khi mới tạo tài khoản.
-Chưa có xác minh email, tự khôi phục mật khẩu hoặc giới hạn thử đăng nhập; chỉ dùng localhost demo.
-
-Chạy kiểm tra: `python -m unittest discover -s tests -v`.
-
-## Đăng nhập bằng số điện thoại
-Hội viên dùng số điện thoại + mật khẩu, nhân viên vẫn dùng tài khoản cũ.
-Email tùy chọn khi đăng ký và có thể thêm/sửa/bỏ sau đó ở Trang cá nhân > Lưu email.
-Không có email thì bỏ qua gửi SMTP; đăng ký gói và thanh toán vẫn hoạt động.
-Tài khoản hội viên cũ dùng số điện thoại trong hồ sơ và mật khẩu cũ; không đổi ID, hóa đơn hay lịch tập.
-Chấp nhận số 9–15 chữ số, bỏ khoảng trắng/dấu chấm/gạch ngang/ngoặc, đổi +84 thành 0.
-Nếu hồ sơ cũ trùng số điện thoại, chặn đăng nhập thay vì đoán tài khoản; cần lễ tân hỗ trợ.
-Email không còn là định danh đăng nhập. Chưa có OTP xác minh số điện thoại.
-
-## Đăng ký lại số điện thoại sau khi xóa
-Chỉ hồ sơ chưa xóa giữ số điện thoại. Sau khi xóa, số đó được đăng ký tài khoản mới.
-Tài khoản mới có ID, mật khẩu và hồ sơ riêng; không xem được hóa đơn/lịch tập cũ.
-Lịch sử đã thu vẫn giữ ở hồ sơ cũ; tài khoản và phiên đăng nhập cũ vẫn bị khóa.
-Nếu số thuộc hồ sơ tại quầy chưa có tài khoản và chưa xóa, cần lễ tân hỗ trợ, không tự chiếm hồ sơ.
-
-## Đổi và đặt lại mật khẩu
-- Hội viên: Trang cá nhân > Đổi mật khẩu. Nhập mật khẩu hiện tại, mật khẩu mới và nhập lại.
-- Quản trị viên hoặc lễ tân: Hội viên > Đặt lại mật khẩu (chỉ hồ sơ đang hoạt động có tài khoản).
-  Nhập mật khẩu tài khoản đang thao tác để xác nhận, sau đó mật khẩu mới cho hội viên và nhập lại.
-- Mật khẩu mới có 8–128 ký tự, chỉ lưu dạng băm; không hiển thị hoặc gửi mật khẩu qua email.
-- Đổi/đặt lại mật khẩu tăng phiên bản xác thực; mọi phiên cũ bị chặn ở lần truy cập tiếp theo.
-  Hội viên tự đổi sẽ được đưa về đăng nhập ngay; quản trị viên giữ phiên hiện tại.
-- Hồ sơ tại quầy chưa có tài khoản hoặc hồ sơ đã xóa không được đặt lại mật khẩu.
-- Database tự thêm auth_version khi khởi động, giữ các tài khoản và dữ liệu cũ.
-
-## Gộp thu ngân vào lễ tân và xếp lịch cho HLV
-Chỉ còn vai trò admin, reception (lễ tân kiêm thu ngân), trainer và member.
-Không tạo tài khoản thungan cho database mới; tài khoản cashier cũ được chuyển sang reception, giữ mật khẩu.
-Lễ tân có Thanh toán, Xóa hội viên và Đặt lại mật khẩu (xác nhận bằng mật khẩu của chính lễ tân).
-HLV có trang Hội viên chỉ đọc và mục Yêu cầu HLV để xác nhận hoặc từ chối.
-
-## Hội viên chọn HLV và HLV xác nhận
-1. Hội viên đăng nhập > Trang cá nhân > Đăng ký huấn luyện viên > chọn HLV > Gửi yêu cầu.
-2. HLV đăng nhập > Yêu cầu HLV > Xác nhận làm HLV hoặc Từ chối.
-3. Chỉ sau khi xác nhận, HLV mới được tạo/xóa lịch cho hội viên đó.
-- Hội viên có thể hủy yêu cầu đang chờ để chọn HLV khác. Mỗi người chỉ có một yêu cầu chờ.
-- Khi đã được nhận: Hủy đăng ký HLV > xác nhận, sau đó chọn HLV khác và chờ xác nhận mới.
-- Lễ tân/admin có thể gửi yêu cầu hỗ trợ tại quầy, không thể bỏ qua xác nhận của HLV.
-- Không còn tự phân công khi tạo lịch. Chỉ HLV đã xác nhận được lập lịch; admin/lễ tân không xếp lịch.
-- Chỉ HLV được chọn mới xử lý yêu cầu đó. Yêu cầu đã xử lý/hủy không được xử lý lại.
-- Xóa hội viên hủy yêu cầu chờ; giữ lịch sử đã có.
-- Nâng cấp lần đầu: phân công cũ chuyển thành yêu cầu chờ HLV xác nhận; giữ lịch tập/hóa đơn cũ.
-  Chạy lại không tạo trùng hay đặt lại yêu cầu đã được chấp nhận.
-
-## Hủy đăng ký HLV đã được nhận
-Trang cá nhân > Hủy đăng ký HLV > Xác nhận hủy. Yêu cầu chuyển sang Đã hủy, bỏ liên kết HLV.
-Lịch tập hiện tại được đánh dấu ngừng hoạt động, giữ dữ liệu cũ nhưng không hiển thị như lịch hiện tại
-và không tính vào giới hạn ngày tập. HLV cũ không lập/xóa lịch của hội viên được nữa.
-Gói Gym, thời hạn, hóa đơn và số tiền đã thanh toán không bị thay đổi; không có phí HLV riêng ở bản demo.
-Hội viên có thể gửi yêu cầu chọn HLV mới; cần xác nhận mới trước khi lập lịch mới.
-Đổi mật khẩu được đặt bên phải Lưu email trong phần thông tin cá nhân.
-
-## Danh sách hội viên của HLV
-HLV chỉ thấy người có liên kết hiện tại với chính HLV đó và có yêu cầu Đã nhận.
-Áp dụng cả trang Hội viên và danh sách chọn tại Lịch tập; không trả thông tin hội viên khác ra HTML.
-Người chưa đăng ký, đang chờ, đã hủy, đã xóa hoặc thuộc HLV khác không xuất hiện.
-Yêu cầu đang chờ vẫn hiển thị riêng ở Yêu cầu HLV. Lễ tân/admin vẫn xem danh sách chung, không lập lịch tập.
-
-## Tạo tài khoản HLV và quyền xếp lịch
-Admin hoặc lễ tân vào Quản lý HLV > nhập họ tên, tên đăng nhập, mật khẩu và nhập lại > Tạo tài khoản.
-Tên đăng nhập 3–40 ký tự, bắt đầu bằng chữ không dấu, có thể chứa số và . _ -; không trùng tài khoản khác.
-Mật khẩu 8–128 ký tự, chỉ lưu dạng băm và không hiển thị trong danh sách.
-Vai trò luôn là trainer, người tạo không thể dùng form này để tạo admin/lễ tân.
-Database mới không tự tạo hlv mặc định; tài khoản HLV cũ được giữ nguyên.
-HLV vừa tạo xuất hiện trong danh sách để hội viên chọn, cần xác nhận trước khi lập lịch.
-Admin/lễ tân không có nút Lịch tập hoặc Lập lịch; truy cập trực tiếp /plans và xóa lịch cũng bị chặn.
-
-## Xóa HLV
-Admin/lễ tân > Quản lý HLV > Xóa HLV > nhập mã xác nhận. Chỉ xóa tài khoản có vai trò HLV.
-Tài khoản HLV bị ẩn/khóa, mọi phiên cũ bị chặn; không xóa dữ liệu lịch sử khỏi database.
-Yêu cầu đang chờ/đã nhận với HLV đó chuyển thành Đã hủy, các hội viên bỏ liên kết HLV.
-Lịch tập đang hoạt động của những hội viên đang thuộc HLV bị xóa được dừng, giữ lịch sử.
-Gói Gym và hóa đơn không đổi; hội viên có thể chọn HLV khác. Các HLV/hội viên khác không bị ảnh hưởng.
-Tên đăng nhập cũ được giải phóng để có thể tạo HLV mới; tài khoản mới có ID riêng, không nhận dữ liệu cũ.
-
-## Trang chính của HLV
-Sau đăng nhập, HLV thấy bảng Lịch đã xếp: hội viên, bài tập, số hiệp, số lần/hiệp và ngày tập.
-Chỉ hiển thị lịch đang hoạt động của người đã được chính HLV đó xác nhận.
-Không hiển thị hoặc truy vấn dữ liệu doanh thu/đăng ký theo tháng trên trang chính HLV.
-Admin/lễ tân vẫn xem Tổng quan thống kê như trước. Trang Lịch tập vẫn dùng để thêm/xóa bài tập.
-
-
-## Giao diện mới
-- Thanh điều hướng bên trái theo vai trò, đánh dấu màn hình đang mở; menu thu gọn trên điện thoại.
-- Trang đăng nhập/đăng ký với hướng dẫn rõ ràng, nút hiện/ẩn mật khẩu và thông báo lỗi dễ nhận biết.
-- Tổng quan admin/lễ tân có thẻ số liệu và biểu đồ; HLV vẫn chỉ thấy lịch đã xếp của mình.
-- Trang cá nhân có thẻ hội viên, chọn gói bằng thẻ radio và trạng thái yêu cầu HLV.
-- Tìm nhanh trong bảng, hỗ trợ gõ không dấu, số kết quả và trạng thái không tìm thấy.
-- Bảng cuộn ngang trên điện thoại; hỗ trợ bàn phím, tiêu điểm rõ, liên kết bỏ qua điều hướng.
-- Không cần Node hoặc bước build mới; chạy Flask như trước. CSS/JS nằm trong static.
-- Biểu đồ vẫn dùng Chart.js từ CDN; khi không tải được, mở bảng số liệu chi tiết bên dưới.
-- Sau khi pull, dừng/chạy lại Flask và nhấn Ctrl+F5 trên trình duyệt để tải CSS/JS mới.
+Đây là bản demo localhost. Chưa có OTP, tự khôi phục mật khẩu hoặc giới hạn thử đăng nhập.
+Trước triển khai công khai cần bổ sung HTTPS, bảo vệ đăng nhập, sao lưu và quản lý tài khoản đầy đủ.

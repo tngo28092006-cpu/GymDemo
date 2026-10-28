@@ -108,7 +108,7 @@ class MemberFlow(unittest.TestCase):
   self.assertEqual(self.signup(email='').status_code,302)
   self.assertEqual(self.login(user='a@example.com').status_code,200)
   self.assertEqual(self.login(user='+84 901-234-567').status_code,302)
-  self.assertIn('Chưa thêm email',self.c.get('/account').get_data(as_text=True))
+  self.assertIn('Chưa thêm email',self.c.get('/account/info').get_data(as_text=True))
   self.post('/account',{'action':'email','email':'new@gmail.com','member':999})
   with db() as c:
    self.assertEqual(c.execute('SELECT email FROM members').fetchone()[0],'new@gmail.com')
@@ -156,7 +156,7 @@ class MemberFlow(unittest.TestCase):
   self.assertEqual(self.login(password='NewPass123').status_code,302)
   page=self.c.get('/account').get_data(as_text=True)
   self.assertIn('New Person',page);self.assertNotIn('Old Person',page);self.assertNotIn('Squat',page)
-  self.assertIn('Chưa có hóa đơn.',page)
+  self.assertIn('Chưa có hóa đơn.',self.c.get('/account/packages').get_data(as_text=True))
   self.signup()  # Logged-in signup cannot create another profile.
   with db() as c:
    self.assertEqual(c.execute('SELECT count(*) FROM members WHERE deleted_at IS NULL').fetchone()[0],1)
@@ -171,7 +171,7 @@ class MemberFlow(unittest.TestCase):
   self.login();other_session=app.test_client();self.login(client=other_session)
   url='/account/password'
   self.assertEqual(self.c.get(url).status_code,200)
-  self.assertIn('Đổi mật khẩu',self.c.get('/account').get_data(as_text=True))
+  self.assertIn('Đổi mật khẩu',self.c.get('/account/info').get_data(as_text=True))
   self.assertEqual(self.c.post(url,data={}).status_code,400)
   for current,password,confirm in [('wrong','NewPass123','NewPass123'),('Member12345','short','short'),('Member12345','NewPass123','Mismatch'),('Member12345','Member12345','Member12345')]:
    self.assertEqual(self.post(url,dict(current_password=current,password=password,confirm_password=confirm)).status_code,200)
@@ -260,7 +260,7 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(c.execute('SELECT status FROM trainer_requests').fetchone()[0],'accepted')
    self.assertEqual(c.execute('SELECT count(*) FROM plans').fetchone()[0],1)
   self.assertIn('Squat',self.c.get('/account').get_data(as_text=True))
-  self.assertIn('Đã được hlv xác nhận',self.c.get('/account').get_data(as_text=True))
+  self.assertIn('Đã được hlv xác nhận',self.c.get('/account/info').get_data(as_text=True))
 
  def test_cancel_reject_and_request_ownership(self):
   self.signup();self.login()
@@ -356,7 +356,7 @@ class MemberFlow(unittest.TestCase):
   hlv=app.test_client();self.login('hlv','Gym@12345',hlv)
   self.post(f'/trainer-requests/{rid}/respond',{'decision':'accept'},hlv)
   self.post('/plans',dict(member=mid,exercise=1,sets=3,reps=15,days=['2']),hlv)
-  self.assertIn('Hủy đăng ký HLV',self.c.get('/account').get_data(as_text=True))
+  self.assertIn('Hủy đăng ký HLV',self.c.get('/account/info').get_data(as_text=True))
   self.assertEqual(self.c.get('/account/trainer/cancel').status_code,200)
   self.assertEqual(self.c.post('/account/trainer/cancel',data={'request_id':rid}).status_code,400)
   self.post('/account/trainer/cancel',{'request_id':99999})
@@ -438,7 +438,7 @@ class MemberFlow(unittest.TestCase):
    self.assertEqual(newtrainer.get('/trainer-requests').status_code,200)
    self.assertEqual(newtrainer.get('/trainers').status_code,403)
   self.signup();self.login()
-  self.assertIn('Nguyen Trainer',self.c.get('/account').get_data(as_text=True))
+  self.assertIn('Nguyen Trainer',self.c.get('/account/info').get_data(as_text=True))
   self.assertEqual(self.post('/trainers',dict(username='hacker')).status_code,403)
 
  def test_trainer_creation_validation_and_no_default_trainer(self):
@@ -567,4 +567,58 @@ class MemberFlow(unittest.TestCase):
   self.post('/logout',{});self.login('admin','Gym@12345')
   self.assertIn('Doanh thu',self.c.get('/').get_data(as_text=True))
 
+ def test_member_three_pages_separate_home_info_and_package_catalog(self):
+  self.signup();self.login()
+  home=self.c.get('/account').get_data(as_text=True)
+  info=self.c.get('/account/info').get_data(as_text=True)
+  packages=self.c.get('/account/packages').get_data(as_text=True)
+  self.assertIn('Trang chủ',home);self.assertIn('Thông tin',home);self.assertIn('Đăng ký gói tập',home)
+  self.assertIn('Lịch tập của bạn',home);self.assertIn('Ngày đăng ký gói',home);self.assertIn('Ngày hết hạn',home);self.assertIn('Số ngày còn lại',home)
+  self.assertNotIn('name="email"',home);self.assertNotIn('name="package"',home)
+  self.assertIn('Thông tin tài khoản',info);self.assertIn('name="email"',info);self.assertIn('Đổi mật khẩu',info)
+  self.assertNotIn('name="package"',info);self.assertNotIn('Lịch tập của bạn</h2>',info)
+  for months in [1,3,6,12]:self.assertIn('Đăng ký gói '+str(months)+' tháng',packages)
+  self.assertNotIn('name="email"',packages)
+  self.assertEqual(self.post('/account/info',dict(action='email',email='new@example.com')).status_code,302)
+  with db() as c:self.assertEqual(c.execute('SELECT email FROM members').fetchone()[0],'new@example.com')
+  self.assertEqual(self.c.post('/account/packages',data={'package':1}).status_code,400)
+  response=self.post('/account/packages',{'package':1})
+  self.assertTrue(response.location.endswith('/account/packages'))
+  self.post('/account/packages',{'package':2})
+  with db() as c:self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0],1)
+  self.assertIn('Chờ kích hoạt',self.c.get('/account').get_data(as_text=True))
+
+ def test_member_home_remaining_days_and_expiry_boundaries(self):
+  from datetime import date,timedelta
+  self.signup();self.login()
+  today=date.today()
+  with db() as c:
+   mid=c.execute('SELECT id FROM members').fetchone()[0]
+   c.execute('INSERT INTO invoices(member,months,amount,created,paid_at,starts,expires) VALUES(?,1,500000,?,?,?,?)',(mid,(today-timedelta(days=8)).isoformat(),(today-timedelta(days=8)).isoformat(),(today-timedelta(days=8)).isoformat(),(today+timedelta(days=22)).isoformat()))
+  page=self.c.get('/account').get_data(as_text=True)
+  self.assertIn('22<span> ngày</span>',page);self.assertIn((today+timedelta(days=22)).isoformat(),page)
+  self.assertIn('Đang hoạt động',page)
+  for delta in [0,-2]:
+   with db() as c:c.execute('UPDATE invoices SET expires=?',((today+timedelta(days=delta)).isoformat(),))
+   page=self.c.get('/account').get_data(as_text=True)
+   self.assertIn('Đã hết hạn',page);self.assertIn('0<span> ngày</span>',page)
+  with db() as c:c.execute('UPDATE invoices SET starts=?,expires=?',((today+timedelta(days=2)).isoformat(),(today+timedelta(days=32)).isoformat()))
+  page=self.c.get('/account').get_data(as_text=True)
+  self.assertIn('Chưa đến ngày bắt đầu',page);self.assertNotIn('32<span> ngày</span>',page)
+
+ def test_new_member_pages_restrict_access_and_keep_member_data_private(self):
+  self.signup();self.signup(phone='0901234568',email='b@example.com',name='Private B')
+  with db() as c:
+   mid=c.execute("SELECT id FROM members WHERE phone='0901234568'").fetchone()[0]
+   c.execute("INSERT INTO invoices(member,months,amount,created) VALUES(?,12,3456789,'2026-01-01')",(mid,))
+  for path in ['/account','/account/info','/account/packages']:self.assertEqual(self.c.get(path).status_code,302)
+  self.login()
+  for path in ['/account','/account/info','/account/packages']:
+   page=self.c.get(path+'?member='+str(mid)).get_data(as_text=True)
+   self.assertNotIn('Private B',page);self.assertNotIn('b@example.com',page);self.assertNotIn('3,456,789',page)
+  for user in ['admin','letan','hlv']:
+   staff=app.test_client();self.login(user,'Gym@12345',staff)
+   for path in ['/account','/account/info','/account/packages']:self.assertEqual(staff.get(path).status_code,403)
+
 if __name__=='__main__': unittest.main()
+

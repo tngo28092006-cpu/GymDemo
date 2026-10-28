@@ -216,6 +216,22 @@ def signup():
 @app.route('/account', methods=['GET', 'POST'])
 @require('member')
 def account():
+    return member_area('home')
+
+
+@app.route('/account/info', methods=['GET', 'POST'])
+@require('member')
+def account_info():
+    return member_area('info')
+
+
+@app.route('/account/packages', methods=['GET', 'POST'])
+@require('member')
+def account_packages():
+    return member_area('packages')
+
+
+def member_area(page):
     # Admin bypass in require() is appropriate for staff routes, not a member identity.
     if session['role'] != 'member': abort(403)
     with db() as c:
@@ -225,11 +241,11 @@ def account():
         if request.method == 'POST':
             if request.form.get('action') == 'trainer_request':
                 flash(request_trainer(c,member['id'],request.form.get('trainer','')))
-                return redirect('/account')
+                return redirect('/account/info')
             if request.form.get('action') == 'cancel_trainer_request':
                 changed = c.execute("UPDATE trainer_requests SET status='cancelled',responded=? WHERE id=? AND member=? AND status='pending'", (datetime.now().isoformat(),request.form.get('request_id',''),member['id'])).rowcount
                 flash('Đã hủy yêu cầu HLV.' if changed else 'Yêu cầu không còn ở trạng thái chờ.')
-                return redirect('/account')
+                return redirect('/account/info')
             if request.form.get('action') == 'email':
                 email = request.form.get('email', '').strip().lower()
                 if not valid_email(email):
@@ -237,7 +253,7 @@ def account():
                 else:
                     c.execute('UPDATE members SET email=? WHERE id=?', (email, member['id']))
                     flash('Đã cập nhật email.' if email else 'Đã bỏ email khỏi hồ sơ.')
-                return redirect('/account')
+                return redirect('/account/info')
             package = c.execute('SELECT * FROM packages WHERE id=?', (request.form.get('package',''),)).fetchone()
             pending = c.execute('SELECT 1 FROM invoices WHERE member=? AND paid_at IS NULL', (member['id'],)).fetchone()
             if not package:
@@ -249,7 +265,7 @@ def account():
                           (member['id'],package['months'],package['price'],date.today().isoformat()))
                 c.commit()
                 flash('Đã đăng ký gói tập. Vui lòng thanh toán tại quầy. '+confirmation(member['email'],member['name']))
-            return redirect('/account')
+            return redirect('/account/packages')
         invoices = c.execute('SELECT * FROM invoices WHERE member=? ORDER BY id DESC', (member['id'],)).fetchall()
         plans = c.execute('SELECT p.*,e.name exercise_name FROM plans p JOIN exercises e ON e.id=p.exercise WHERE p.member=? AND p.active=1', (member['id'],)).fetchall()
         active = c.execute('SELECT * FROM invoices WHERE member=? AND paid_at IS NOT NULL AND starts<=? AND expires>? ORDER BY expires DESC LIMIT 1',
@@ -258,8 +274,27 @@ def account():
         trainers = c.execute("SELECT id,username,full_name FROM users WHERE role='trainer' AND active=1 ORDER BY username").fetchall()
         trainer_requests = c.execute('SELECT r.*,(CASE WHEN length(u.full_name)>0 THEN u.full_name ELSE u.username END) trainer_name FROM trainer_requests r JOIN users u ON u.id=r.trainer WHERE r.member=? ORDER BY r.id DESC',(member['id'],)).fetchall()
         pending_request = next((r for r in trainer_requests if r['status']=='pending'),None)
-    return render_template('account.html',member=member,invoices=invoices,plans=plans,active=active,packages=packages,
-                           pending=any(not i['paid_at'] for i in invoices),trainers=trainers,trainer_requests=trainer_requests,pending_request=pending_request)
+        started = c.execute('SELECT * FROM invoices WHERE member=? AND paid_at IS NOT NULL AND starts<=? ORDER BY expires DESC,id DESC LIMIT 1', (member['id'],date.today().isoformat())).fetchone()
+        upcoming = c.execute('SELECT * FROM invoices WHERE member=? AND paid_at IS NOT NULL AND starts>? ORDER BY starts,id LIMIT 1', (member['id'],date.today().isoformat())).fetchone()
+    membership = active or started or upcoming
+    pending_invoice = next((i for i in invoices if not i['paid_at']),None)
+    if active:
+        membership_status = 'active'
+        days_remaining = max(0,(date.fromisoformat(active['expires'])-date.today()).days)
+    elif started:
+        membership_status = 'expired'
+        days_remaining = 0
+    elif upcoming:
+        membership_status = 'upcoming'
+        days_remaining = None
+    else:
+        membership_status = 'pending' if pending_invoice else 'none'
+        days_remaining = None
+    template = {'home':'member_home.html','info':'account.html','packages':'member_packages.html'}[page]
+    return render_template(template,member=member,invoices=invoices,plans=plans,active=active,packages=packages,
+                           pending=bool(pending_invoice),pending_invoice=pending_invoice,trainers=trainers,
+                           trainer_requests=trainer_requests,pending_request=pending_request,membership=membership,
+                           membership_status=membership_status,days_remaining=days_remaining)
 
 
 @app.route('/account/trainer/cancel', methods=['GET','POST'])
@@ -273,16 +308,16 @@ def cancel_trainer():
         accepted = c.execute("SELECT id FROM trainer_requests WHERE member=? AND trainer=? AND status='accepted' ORDER BY id DESC LIMIT 1",(member['id'],member['trainer'])).fetchone()
         if not member['trainer'] or not accepted:
             flash('Bạn chưa có đăng ký HLV được xác nhận để hủy.')
-            return redirect('/account')
+            return redirect('/account/info')
         if request.method == 'POST':
             if request.form.get('request_id') != str(accepted['id']):
                 flash('Đăng ký HLV đã thay đổi. Hãy mở lại trang xác nhận trước khi hủy.')
-                return redirect('/account')
+                return redirect('/account/info')
             c.execute("UPDATE trainer_requests SET status='cancelled',responded=? WHERE member=? AND trainer=? AND status='accepted'",(datetime.now().isoformat(),member['id'],member['trainer']))
             c.execute('UPDATE members SET trainer=NULL WHERE id=?',(member['id'],))
             c.execute('UPDATE plans SET active=0 WHERE member=? AND active=1',(member['id'],))
             flash('Đã hủy đăng ký HLV và dừng lịch tập hiện tại. Bạn có thể chọn HLV khác; gói Gym và thanh toán được giữ nguyên.')
-            return redirect('/account')
+            return redirect('/account/info')
     return render_template('cancel_trainer.html',member=member,accepted=accepted)
 
 
@@ -579,4 +614,5 @@ init_db()
 
 if __name__=='__main__':
     app.run(host='127.0.0.1',port=5000,debug=os.getenv('FLASK_DEBUG')=='1')
+
 
