@@ -506,3 +506,68 @@ input:focus, select:focus { border-color: var(--primary); }
     .workout-filter [role="status"] { flex-basis: 100%; margin: 0; }
     .workout-filter [role="status"]:empty { display: none; }
 }
+
+/* Operations dashboard, invoices, and pricing */
+.operations-heading { margin-bottom: 24px; }
+.operations-stats { margin-bottom: 16px; }
+.operations-stats .card { height: 100%; }
+.operations-stats .card a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    font-size: 13px;
+    font-weight: 650;
+}
+.operations-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.invoice-overview {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    margin: 0 0 20px;
+}
+.invoice-overview > div {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 16px 20px;
+}
+.invoice-overview > div:nth-child(2) {
+    background: #fff4ec;
+    border-color: #f0d1bd;
+}
+.invoice-overview dt { color: var(--muted); font-size: 13px; font-weight: 650; }
+.invoice-overview dd {
+    font-size: clamp(23px, 3vw, 34px);
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    margin: 6px 0 0;
+}
+.invoice-action { margin-top: 8px; }
+.table-state-filter { width: auto; max-width: 100%; margin: 0; }
+.pricing-editor {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 245px), 1fr));
+    gap: 18px;
+    margin: 24px 0;
+    max-width: 1100px;
+}
+.price-editor-card { margin: 0; }
+.price-editor-card header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.price-editor-card h2 { margin: 0; }
+.price-editor-card label { margin: 0; }
+.price-editor-card input { margin: 6px 0 14px; font-variant-numeric: tabular-nums; }
+.price-editor-card button { width: 100%; }
+@media (max-width: 1100px) {
+    .invoice-table tbody td:nth-child(4),
+    .invoice-table tbody td:nth-child(5) { grid-column: auto; }
+}
+@media (max-width: 950px) {
+    .operations-charts { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+    .invoice-overview { gap: 8px; }
+    .invoice-overview > div { padding: 12px 10px; }
+    .invoice-overview dt { font-size: 12px; }
+    .table-state-filter { width: 100%; }
+}

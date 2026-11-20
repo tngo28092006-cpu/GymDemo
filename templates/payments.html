@@ -1,1 +1,75 @@
-{% extends 'base.html' %}{% block content %}<span class="eyebrow">THANH TOÁN & HÓA ĐƠN</span><h1>Quản lý thanh toán</h1><p class="muted">Xác nhận tiền đã thu và theo dõi lịch sử thanh toán của hội viên.</p><section class="panel"><table><tr><th>Hóa đơn / Hội viên</th><th>Gói tập</th><th>Thành tiền</th><th>Ngày lập</th><th>Thanh toán</th><th>Hiệu lực gói</th></tr>{% for i in rows %}<tr><td><strong>#{{ i.id }} · {{ i.name }}</strong><br><span class="cell-sub">Mã hội viên {{ i.member|member_code }}</span></td><td>{{ i.months }} tháng</td><td class="money">{{ '{:,}'.format(i.amount) }} đ{% if i.upgrade_from %}<br><small>Đã trừ {{ '{:,}'.format(i.credit_amount) }} đ · nâng từ #{{ i.upgrade_from }}</small>{% endif %}</td><td>{{ (i.created)|vn_date }}</td><td>{% if i.paid_at %}<span class="status-pill">Đã thanh toán</span><br><span class="cell-sub">{{ (i.paid_at)|vn_date }}</span>{% else %}<span class="status-pill pending">Chờ thanh toán</span><form method="post" style="margin-top:8px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="invoice" value="{{ i.id }}"><button>Xác nhận đã thu tiền</button></form>{% endif %}</td><td>{% if i.original_expires %}<strong>Đã thay bằng gói nâng cấp</strong><br><small>Hạn cũ: {{ (i.original_expires)|vn_date }}</small><br>{% endif %}{{ (i.starts or 'Chưa kích hoạt')|vn_date }}{% if i.expires %}<br><span class="cell-sub">Đến trước {{ (i.expires)|vn_date }}</span>{% endif %}</td></tr>{% else %}<tr><td colspan="6">Chưa có hóa đơn. Hóa đơn được tạo khi hội viên chọn gói tập.</td></tr>{% endfor %}</table></section>{% endblock %}
+{% extends 'base.html' %}
+{% block content %}
+<div class="section-heading">
+    <div>
+        <h1>Quản lý thanh toán</h1>
+        <p>Xác nhận tiền đã thu và xem lịch sử hóa đơn.</p>
+    </div>
+</div>
+{% if rows %}
+{% set paid_count = rows|selectattr('paid_at')|list|length %}
+<dl class="invoice-overview">
+    <div><dt>Tổng hóa đơn</dt><dd>{{ rows|length }}</dd></div>
+    <div><dt>Chờ thanh toán</dt><dd>{{ rows|length - paid_count }}</dd></div>
+    <div><dt>Đã thanh toán</dt><dd>{{ paid_count }}</dd></div>
+</dl>
+<section class="panel roster-panel" aria-label="Danh sách hóa đơn">
+    <table class="roster-table invoice-table" role="table" data-invoice-filters>
+        <thead role="rowgroup">
+            <tr role="row">
+                <th scope="col" role="columnheader">Hóa đơn / Hội viên</th>
+                <th scope="col" role="columnheader">Gói tập</th>
+                <th scope="col" role="columnheader">Thành tiền</th>
+                <th scope="col" role="columnheader">Ngày lập</th>
+                <th scope="col" role="columnheader">Hiệu lực gói</th>
+                <th scope="col" role="columnheader">Thanh toán</th>
+            </tr>
+        </thead>
+        <tbody role="rowgroup">
+            {% for i in rows %}
+            <tr role="row" data-invoice-state="{{ 'paid' if i.paid_at else 'pending' }}">
+                <td role="cell">
+                    <strong>{{ i.name }}</strong><br>
+                    <span class="cell-sub">Hóa đơn #{{ i.id }} · {{ i.member|member_code }}</span>
+                </td>
+                <td role="cell"><span class="roster-field" aria-hidden="true">Gói tập</span>{{ i.months }} tháng</td>
+                <td role="cell" class="money">
+                    <span class="roster-field" aria-hidden="true">Thành tiền</span>
+                    {{ '{:,}'.format(i.amount) }} đ
+                    {% if i.upgrade_from %}<br><small>Đã trừ {{ '{:,}'.format(i.credit_amount) }} đ · nâng từ #{{ i.upgrade_from }}</small>{% endif %}
+                </td>
+                <td role="cell"><span class="roster-field" aria-hidden="true">Ngày lập</span>{{ i.created|vn_date }}</td>
+                <td role="cell">
+                    <span class="roster-field" aria-hidden="true">Hiệu lực gói</span>
+                    {% if i.original_expires %}
+                    <strong>Đã thay bằng gói nâng cấp</strong><br>
+                    <small>Hạn cũ: {{ i.original_expires|vn_date }}</small><br>
+                    {% endif %}
+                    {{ (i.starts or 'Chưa kích hoạt')|vn_date }}
+                    {% if i.expires %}<br><span class="cell-sub">Đến trước {{ i.expires|vn_date }}</span>{% endif %}
+                </td>
+                <td role="cell">
+                    {% if i.paid_at %}
+                    <span class="status-pill">Đã thanh toán</span><br><span class="cell-sub">{{ i.paid_at|vn_date }}</span>
+                    {% else %}
+                    <span class="status-pill pending">Chờ thanh toán</span>
+                    <form class="invoice-action" method="post">
+                        <input type="hidden" name="csrf" value="{{ csrf }}">
+                        <input type="hidden" name="invoice" value="{{ i.id }}">
+                        <button>Xác nhận đã thu tiền</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% else %}
+<section class="panel schedule-empty">
+    {{ icon('wallet') }}
+    <strong>Chưa có hóa đơn</strong>
+    <p>Hóa đơn sẽ xuất hiện khi hội viên chọn gói tập.</p>
+</section>
+{% endif %}
+{% endblock %}

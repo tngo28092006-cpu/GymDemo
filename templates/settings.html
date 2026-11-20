@@ -1,1 +1,27 @@
-{% extends 'base.html' %}{% block content %}<span class="eyebrow">GIÁ GÓI TẬP</span><h1>Bảng giá</h1><p class="muted">Cập nhật giá các gói tập hiện có. Giá mới chỉ áp dụng cho hóa đơn tạo sau này.</p><div class="narrow" style="max-width:800px;margin:24px 0"><section class="panel"><div class="section-heading"><div><h2>Giá gói tập</h2><p>Giá mới chỉ áp dụng cho hóa đơn tạo sau này.</p></div><span class="card-icon">{{ icon('wallet') }}</span></div>{% for p in packages %}<form method="post" class="price-setting"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="price"><input type="hidden" name="id" value="{{ p.id }}"><span class="package-duration"><strong>{{ p.months }}</strong><small>tháng</small></span><label>Giá gói (VND)<input type="number" min="1" name="price" value="{{ p.price }}" required></label><button>Lưu giá</button></form>{% endfor %}<p class="muted"><small>Hóa đơn đã lập giữ nguyên giá ban đầu.</small></p></section></div>{% endblock %}
+{% extends 'base.html' %}
+{% block content %}
+<div class="section-heading">
+    <div>
+        <h1>Bảng giá</h1>
+        <p>Giá mới áp dụng cho hóa đơn lập sau khi lưu.</p>
+    </div>
+</div>
+<div class="pricing-editor">
+    {% for p in packages %}
+    <section class="panel price-editor-card" aria-labelledby="price-heading-{{ p.id }}">
+        <header>
+            <span class="card-icon">{{ icon('wallet') }}</span>
+            <h2 id="price-heading-{{ p.id }}">Gói {{ p.months }} tháng</h2>
+        </header>
+        <form method="post">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="action" value="price">
+            <input type="hidden" name="id" value="{{ p.id }}">
+            <label for="price-{{ p.id }}">Giá gói (VND)</label>
+            <input id="price-{{ p.id }}" type="number" min="1" max="2147483647" name="price" value="{{ p.price }}" required>
+            <button type="submit">Lưu giá</button>
+        </form>
+    </section>
+    {% endfor %}
+</div>
+{% endblock %}

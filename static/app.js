@@ -177,7 +177,8 @@
         const input = document.createElement('input');
         input.type = 'search';
         input.id = `table-search-${index}`;
-        input.placeholder = 'Tìm trong danh sách…';
+        const isInvoiceTable = table.hasAttribute('data-invoice-filters');
+        input.placeholder = isInvoiceTable ? 'Tìm theo hóa đơn hoặc hội viên…' : 'Tìm trong danh sách…';
         input.setAttribute('aria-label', 'Tìm trong danh sách');
         label.appendChild(input);
         const count = document.createElement('span');
@@ -192,18 +193,33 @@
         empty.hidden = true;
         (table.tBodies[0] || table).appendChild(empty);
         const normalize = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'd').toLowerCase();
-        input.addEventListener('input', () => {
+        const status = document.createElement('select');
+        if (isInvoiceTable) {
+            status.className = 'table-state-filter';
+            status.setAttribute('aria-label', 'Trạng thái thanh toán');
+            status.append(new Option('Tất cả trạng thái', ''), new Option('Chờ thanh toán', 'pending'),
+                new Option('Đã thanh toán', 'paid'));
+        }
+        const filterRows = () => {
             const query = normalize(input.value.trim());
             let total = 0;
             rows.forEach(row => {
-                const match = normalize(row.textContent).includes(query);
+                const matchesText = normalize(row.textContent).includes(query);
+                const matchesStatus = !status.value || row.dataset.invoiceState === status.value;
+                const match = matchesText && matchesStatus;
                 row.hidden = !match;
                 if (match) total++;
             });
             count.textContent = `${total} / ${rows.length} mục`;
             empty.hidden = total > 0;
-        });
-        toolbar.append(label, count);
+        };
+        input.addEventListener('input', filterRows);
+        toolbar.append(label);
+        if (isInvoiceTable) {
+            status.addEventListener('change', filterRows);
+            toolbar.append(status);
+        }
+        toolbar.append(count);
         wrapper.before(toolbar);
     });
 })();
