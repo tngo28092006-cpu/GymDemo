@@ -126,6 +126,9 @@
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'password-toggle';
+        if (document.body.dataset.page === 'signup') {
+            button.tabIndex = -1;
+        }
         button.textContent = 'Hiện';
         button.setAttribute('aria-label', 'Hiện mật khẩu');
         button.setAttribute('aria-pressed', 'false');
