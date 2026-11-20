@@ -80,6 +80,7 @@
         sidebar?.classList.remove('is-open');
         menu?.setAttribute('aria-expanded', 'false');
         if (overlay) overlay.hidden = true;
+        document.body.classList.remove('menu-open');
     };
     menu?.addEventListener('click', () => {
         const open = menu.getAttribute('aria-expanded') !== 'true';
@@ -87,8 +88,26 @@
         sidebar.classList.toggle('is-open', open);
         menu.setAttribute('aria-expanded', String(open));
         overlay.hidden = !open;
+        document.body.classList.toggle('menu-open', open);
+        if (open) sidebar.querySelector('a')?.focus();
     });
-    overlay?.addEventListener('click', closeMenu);
+    overlay?.addEventListener('click', () => {
+        closeMenu();
+        menu?.focus();
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Tab' || !sidebar?.classList.contains('is-open')) return;
+        const controls = [menu, ...sidebar.querySelectorAll('a[href], button:not(:disabled)')];
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    });
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape' && sidebar?.classList.contains('is-open')) {
             closeMenu();
@@ -119,7 +138,7 @@
         });
         wrapper.appendChild(button);
     });
-    const searchable = ['members', 'payments', 'manage_trainers', 'plans', 'dashboard', 'trainer_requests'];
+    const searchable = ['members', 'payments', 'manage_trainers', 'plans', 'dashboard', 'trainer_requests', 'manage_receptionists'];
     document.querySelectorAll('table').forEach((table, index) => {
         table.classList.add('table-cols-' + (table.rows[0]?.cells.length || 0));
         const wrapper = document.createElement('div');
