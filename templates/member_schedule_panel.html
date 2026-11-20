@@ -1,1 +1,45 @@
-<section class="panel"><div class="section-heading"><div><h2>Lịch tập của bạn</h2><p>Kế hoạch tập luyện được HLV chuẩn bị cho bạn.</p></div><span class="card-icon">{{ icon('calendar') }}</span></div><table><tr><th>Bài tập</th><th>Số hiệp</th><th>Số lần/hiệp</th><th>Ngày tập</th></tr>{% for p in plans %}<tr><td>{{ p.exercise_name }}</td><td>{{ p.sets }}</td><td>{{ p.reps }}</td><td>{% for d in p.days.split(',') %}<span class="status-pill">{{ 'Chủ nhật' if d=='8' else 'Thứ '~d }}</span>{{ ', ' if not loop.last }}{% endfor %}</td></tr>{% else %}<tr><td colspan="4"><div class="schedule-empty">{{ icon('calendar') }}<strong>Lịch tập đang chờ bạn</strong><p>Huấn luyện viên sẽ chuẩn bị kế hoạch sau khi xác nhận đồng hành cùng bạn.</p><a class="button secondary" href="/account/info">Xem huấn luyện viên của bạn</a></div></td></tr>{% endfor %}</table></section>
+<section class="panel workout-panel" aria-labelledby="workout-heading">
+    <div class="section-heading">
+        <div>
+            <h2 id="workout-heading">Lịch tập của bạn</h2>
+            {% if plans %}<p>{{ plans|length }} bài tập theo kế hoạch của HLV</p>{% endif %}
+        </div>
+        <span class="card-icon">{{ icon('calendar') }}</span>
+    </div>
+    {% if plans %}
+    <div class="workout-filter" data-workout-filter hidden>
+        <label for="workout-day">Ngày tập</label>
+        <select id="workout-day" aria-controls="workout-list">
+            <option value="">Tất cả các ngày</option>
+            {% for day in '2345678' %}
+            <option value="{{ day }}">{{ 'Chủ nhật' if day == '8' else 'Thứ ' ~ day }}</option>
+            {% endfor %}
+        </select>
+        <span data-workout-count role="status"></span>
+    </div>
+    <ul class="workout-list" id="workout-list">
+        {% for plan in plans %}
+        <li class="workout-card" data-workout-days="{{ plan.days }}">
+            <h3>{{ plan.exercise_name }}</h3>
+            <dl class="workout-metrics">
+                <div><dt>Số hiệp</dt><dd>{{ plan.sets }}</dd></div>
+                <div><dt>Số lần/hiệp</dt><dd>{{ plan.reps }}</dd></div>
+            </dl>
+            <div class="workout-days">
+                {% for day in plan.days.split(',') %}
+                <span class="status-pill">{{ 'Chủ nhật' if day == '8' else 'Thứ ' ~ day }}</span>
+                {% endfor %}
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+    <p class="workout-filter-empty muted" data-workout-empty hidden>Không có bài tập cho ngày đã chọn.</p>
+    {% else %}
+    <div class="schedule-empty">
+        {{ icon('calendar') }}
+        <strong>Bạn chưa có lịch tập</strong>
+        <p>{{ 'Lịch tập sẽ hiển thị khi HLV thêm bài tập cho bạn.' if member.trainer else 'Chọn một huấn luyện viên để bắt đầu lập lịch tập.' }}</p>
+        <a class="button secondary" href="/account/info">{{ 'Xem thông tin HLV' if member.trainer else 'Chọn huấn luyện viên' }}</a>
+    </div>
+    {% endif %}
+</section>

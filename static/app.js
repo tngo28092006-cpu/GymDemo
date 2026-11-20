@@ -138,6 +138,28 @@
         });
         wrapper.appendChild(button);
     });
+    const workoutFilter = document.querySelector('[data-workout-filter]');
+    if (workoutFilter) {
+        const daySelect = workoutFilter.querySelector('select');
+        const workouts = [...document.querySelectorAll('[data-workout-days]')];
+        const count = workoutFilter.querySelector('[data-workout-count]');
+        const empty = document.querySelector('[data-workout-empty]');
+        const filterWorkouts = () => {
+            const day = daySelect.value;
+            let visibleCount = 0;
+            for (const workout of workouts) {
+                const matches = !day || workout.dataset.workoutDays.split(',').includes(day);
+                workout.hidden = !matches;
+                if (matches) visibleCount++;
+            }
+            count.textContent = day ? `${visibleCount} / ${workouts.length} bài tập` : '';
+            empty.hidden = visibleCount > 0;
+        };
+        daySelect.addEventListener('change', filterWorkouts);
+        filterWorkouts();
+        workoutFilter.hidden = false;
+    }
+
     const searchable = ['members', 'payments', 'manage_trainers', 'plans', 'dashboard', 'trainer_requests', 'manage_receptionists'];
     document.querySelectorAll('table').forEach((table, index) => {
         table.classList.add('table-cols-' + (table.rows[0]?.cells.length || 0));
