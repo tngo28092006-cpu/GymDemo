@@ -45,6 +45,29 @@ class MemberFlow(unittest.TestCase):
    self.assertTrue(self.login(phone,'Counter123',member).location.endswith('/account'))
    self.assertEqual(member.get('/account').status_code,200)
 
+ def test_registration_rolls_back_when_notification_write_fails(self):
+  staff = self.c
+  self.login('letan', 'Gym@12345', staff)
+  fields = dict(
+      name='At counter', email='counter@example.com', phone='0901234567',
+      gender='Nam', birth=2000, package=1,
+      password='Member12345', confirm_password='Member12345',
+  )
+
+  with patch('index.notify_reception', side_effect=sqlite3.IntegrityError('notification write failed')):
+   response = self.post('/register', fields, staff)
+  self.assertEqual(response.status_code, 200)
+  self.send.assert_not_called()
+
+  with db() as c:
+   self.assertEqual(c.execute("SELECT count(*) FROM users WHERE role='member'").fetchone()[0], 0)
+   self.assertEqual(c.execute('SELECT count(*) FROM members').fetchone()[0], 0)
+   self.assertEqual(c.execute('SELECT count(*) FROM invoices').fetchone()[0], 0)
+
+  retry = self.post('/register', fields, staff)
+  self.assertEqual(retry.status_code, 302)
+  self.send.assert_called_once_with(fields['email'], fields['name'])
+
  def test_upgrade_credit_replaces_term_and_keeps_revenue(self):
   from datetime import date,timedelta
   from index import add_months

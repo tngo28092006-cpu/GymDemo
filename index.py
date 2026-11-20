@@ -1,4 +1,9 @@
-import os, sqlite3, calendar, secrets, smtplib, re
+import calendar
+import os
+import re
+import secrets
+import smtplib
+import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 from functools import wraps
@@ -581,89 +586,127 @@ def logout():
     return redirect('/login')
 
 
+def valid_password_confirmation(password, confirmation):
+    return 8 <= len(password) <= 128 and password == confirmation
+
+
+def create_member_profile(connection, form, *, source, registered_on):
+    name = form.get('name', '').strip()
+    email = form.get('email', '').strip().lower()
+    phone = normalize_phone(form.get('phone', ''))
+    birth = int(form.get('birth', ''))
+    gender = form.get('gender', '')
+    password = form.get('password', '')
+    if (
+        not 1 <= len(name) <= 120
+        or not valid_email(email)
+        or not phone
+        or not 1900 <= birth <= registered_on.year
+        or gender not in ('Nam', 'Nữ', 'Khác')
+        or not valid_password_confirmation(password, form.get('confirm_password'))
+    ):
+        raise ValueError('Invalid member registration fields')
+
+    connection.execute('BEGIN IMMEDIATE')
+    # Legacy profiles may store the same phone number in a different format.
+    current_phones = connection.execute('SELECT phone FROM members WHERE deleted_at IS NULL')
+    if any(normalize_phone(row['phone']) == phone for row in current_phones):
+        return None
+
+    user_id = connection.execute(
+        "INSERT INTO users(username,password,role) VALUES(?,?,'member')",
+        ('member:' + secrets.token_hex(16), generate_password_hash(password)),
+    ).lastrowid
+    member_id = connection.execute(
+        'INSERT INTO members(name,gender,birth,phone,email,registered,source,user_id) '
+        'VALUES(?,?,?,?,?,?,?,?)',
+        (name, gender, birth, phone, email, registered_on.isoformat(), source, user_id),
+    ).lastrowid
+    return member_id, name, email
+
+
 @app.route('/register', methods=['GET', 'POST'])
 @require('reception', 'member')
 def register():
-    if session['role'] == 'member': return redirect('/account')
-    with db() as c:
-        packages = c.execute('SELECT * FROM packages ORDER BY months').fetchall()
-        if request.method == 'POST':
-            try:
-                f = request.form
-                name = f['name'].strip()
-                email = f['email'].strip().lower()
-                phone = normalize_phone(f['phone'])
-                birth = int(f['birth'])
-                password = f.get('password', '')
-                if not name or len(name) > 120 or not valid_email(
-                        email) or not phone or not 1900 <= birth <= date.today().year or f['gender'] not in ['Nam',
-                                                                                                             'Nữ',
-                                                                                                             'Khác'] or not 8 <= len(
-                    password) <= 128 or password != f.get('confirm_password'): raise ValueError()
-                p = c.execute('SELECT * FROM packages WHERE id=?', (f['package'],)).fetchone()
-                if not p: raise ValueError()
-                c.execute('BEGIN IMMEDIATE')
-                if any(normalize_phone(row['phone']) == phone for row in
-                       c.execute('SELECT phone FROM members WHERE deleted_at IS NULL')):
-                    flash('Số điện thoại đã có hồ sơ hội viên. Vui lòng dùng tài khoản hiện có.')
-                    return render_template('register.html', packages=packages)
-                uid = c.execute("INSERT INTO users(username,password,role) VALUES(?,?,'member')",
-                                ('member:' + secrets.token_hex(16), generate_password_hash(password))).lastrowid
-                d = date.today().isoformat()
-                source = 'Tại quầy' if session.get('role') in ['admin', 'reception'] else 'Trực tuyến'
-                mid = c.execute(
-                    'INSERT INTO members(name,gender,birth,phone,email,registered,source,user_id) VALUES(?,?,?,?,?,?,?,?)',
-                    (name, f['gender'], birth, phone, email, d, source, uid)).lastrowid
-                c.execute('INSERT INTO invoices(member,months,amount,created) VALUES(?,?,?,?)',
-                          (mid, p['months'], p['price'], d))
-                notify_reception(c, f'Hội viên {name} đã đăng ký tại quầy, gói {p["months"]} tháng chờ thanh toán.',
-                                 '/payments')
-                c.commit()
-                flash(
-                    f'Đăng ký thành công. Mã hội viên: {member_code(mid)}. Hội viên đăng nhập bằng số điện thoại và mật khẩu vừa tạo. ' + confirmation(
-                        email, name))
-                return redirect('/register')
-            except (ValueError, KeyError, *DB_INTEGRITY_ERRORS):
-                flash('Thông tin không hợp lệ. Email là bắt buộc. Kiểm tra thông tin hội viên và mật khẩu khớp nhau (8–128 ký tự).')
-    return render_template('register.html', packages=packages)
+    if session['role'] == 'member':
+        return redirect('/account')
+
+    packages = []
+    try:
+        with db() as connection:
+            packages = connection.execute('SELECT * FROM packages ORDER BY months').fetchall()
+            if request.method != 'POST':
+                return render_template('register.html', packages=packages)
+
+            package = connection.execute(
+                'SELECT * FROM packages WHERE id=?', (request.form.get('package', ''),)
+            ).fetchone()
+            if package is None:
+                raise ValueError('Invalid package')
+
+            registered_on = date.today()
+            registration = create_member_profile(
+                connection, request.form, source='Tại quầy', registered_on=registered_on
+            )
+            if registration is None:
+                flash('Số điện thoại đã có hồ sơ hội viên. Vui lòng dùng tài khoản hiện có.')
+                return render_template('register.html', packages=packages)
+
+            member_id, name, email = registration
+            connection.execute(
+                'INSERT INTO invoices(member,months,amount,created) VALUES(?,?,?,?)',
+                (member_id, package['months'], package['price'], registered_on.isoformat()),
+            )
+            notify_reception(
+                connection,
+                f'Hội viên {name} đã đăng ký tại quầy, gói {package["months"]} tháng chờ thanh toán.',
+                '/payments',
+            )
+    except (ValueError, *DB_INTEGRITY_ERRORS):
+        flash(
+            'Thông tin không hợp lệ. Email là bắt buộc. '
+            'Kiểm tra thông tin hội viên và mật khẩu khớp nhau (8–128 ký tự).'
+        )
+        return render_template('register.html', packages=packages)
+
+    flash(
+        f'Đăng ký thành công. Mã hội viên: {member_code(member_id)}. '
+        'Hội viên đăng nhập bằng số điện thoại và mật khẩu vừa tạo. '
+        + confirmation(email, name)
+    )
+    return redirect('/register')
 
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
-    if session.get('uid'): return redirect('/')
-    if request.method == 'POST':
-        f = request.form
-        try:
-            name = f.get('name', '').strip()
-            email = f.get('email', '').strip().lower()
-            password = f.get('password', '')
-            phone = normalize_phone(f.get('phone', ''))
-            birth = int(f.get('birth', ''))
-            gender = f.get('gender', '')
-            if (not name or len(name) > 120 or not valid_email(email)
-                    or not 8 <= len(password) <= 128 or password != f.get('confirm_password')
-                    or not phone
-                    or not 1900 <= birth <= date.today().year or gender not in ['Nam', 'Nữ', 'Khác']):
-                raise ValueError()
-            with db() as c:
-                c.execute('BEGIN IMMEDIATE')
-                # Only current profiles reserve phone numbers; archived history stays separate.
-                if any(normalize_phone(row['phone']) == phone for row in
-                       c.execute('SELECT phone FROM members WHERE deleted_at IS NULL')):
-                    flash('Số điện thoại đã có hồ sơ hội viên. Vui lòng đăng nhập hoặc liên hệ lễ tân.')
-                    return render_template('signup.html')
-                uid = c.execute("INSERT INTO users(username,password,role) VALUES(?,?,'member')",
-                                ('member:' + secrets.token_hex(16), generate_password_hash(password))).lastrowid
-                c.execute(
-                    'INSERT INTO members(name,gender,birth,phone,email,registered,source,user_id) VALUES(?,?,?,?,?,?,?,?)',
-                    (name, gender, birth, phone, email, date.today().isoformat(), 'Trực tuyến', uid))
-                notify_reception(c, f'Hội viên {name} vừa đăng ký tài khoản trực tuyến.', '/members')
-            flash('Tạo tài khoản thành công! Hãy đăng nhập bằng số điện thoại để chọn gói tập. '+confirmation(email,name))
-            return redirect('/login')
-        except (ValueError, *DB_INTEGRITY_ERRORS):
-            flash(
-                'Không thể tạo tài khoản. Email là bắt buộc và phải hợp lệ. Kiểm tra số điện thoại và mật khẩu khớp nhau (8–128 ký tự).')
-    return render_template('signup.html')
+    if session.get('uid'):
+        return redirect('/')
+    if request.method != 'POST':
+        return render_template('signup.html')
+
+    try:
+        with db() as connection:
+            registration = create_member_profile(
+                connection, request.form, source='Trực tuyến', registered_on=date.today()
+            )
+            if registration is None:
+                flash('Số điện thoại đã có hồ sơ hội viên. Vui lòng đăng nhập hoặc liên hệ lễ tân.')
+                return render_template('signup.html')
+
+            _, name, email = registration
+            notify_reception(connection, f'Hội viên {name} vừa đăng ký tài khoản trực tuyến.', '/members')
+    except (ValueError, *DB_INTEGRITY_ERRORS):
+        flash(
+            'Không thể tạo tài khoản. Email là bắt buộc và phải hợp lệ. '
+            'Kiểm tra số điện thoại và mật khẩu khớp nhau (8–128 ký tự).'
+        )
+        return render_template('signup.html')
+
+    flash(
+        'Tạo tài khoản thành công! Hãy đăng nhập bằng số điện thoại để chọn gói tập. '
+        + confirmation(email, name)
+    )
+    return redirect('/login')
 
 
 @app.route('/account', methods=['GET', 'POST'])
@@ -697,6 +740,104 @@ def upgrade_source(c, member_id):
     return old
 
 
+def cancel_pending_trainer_request(c, member, request_id):
+    target = c.execute(
+        "SELECT trainer FROM trainer_requests WHERE id=? AND member=? AND status='pending'",
+        (request_id, member['id']),
+    ).fetchone()
+    changed = c.execute(
+        "UPDATE trainer_requests SET status='cancelled',responded=? "
+        "WHERE id=? AND member=? AND status='pending'",
+        (datetime.now().isoformat(), request_id, member['id']),
+    ).rowcount
+    if changed and target is not None:
+        notify_staff(
+            c,
+            target['trainer'],
+            f"Hội viên {member['name']} đã hủy yêu cầu đăng ký HLV.",
+            '/trainer-requests',
+        )
+    flash('Đã hủy yêu cầu HLV.' if changed else 'Yêu cầu không còn ở trạng thái chờ.')
+
+
+def update_member_email(c, member_id, email):
+    email = email.strip().lower()
+    if not valid_email(email):
+        flash('Email là bắt buộc và phải hợp lệ. Không thể bỏ trống email.')
+        return
+
+    c.execute('UPDATE members SET email=? WHERE id=?', (email, member_id))
+    notify_member(c, member_id, 'Thay đổi email thành công.', '/account/info')
+    flash('Đã cập nhật email.')
+
+
+def register_member_package(c, member, package_id):
+    if not valid_email(member['email']):
+        flash('Vui lòng bổ sung email hợp lệ trong Thông tin trước khi đăng ký gói tập.')
+        return redirect('/account/info')
+    package = c.execute('SELECT * FROM packages WHERE id=?', (package_id,)).fetchone()
+    if package is None:
+        flash('Gói tập không hợp lệ.')
+        return redirect('/account/packages')
+
+    pending = c.execute(
+        'SELECT 1 FROM invoices WHERE member=? AND paid_at IS NULL', (member['id'],)
+    ).fetchone()
+    current_months = c.execute(
+        'SELECT max(months) FROM invoices WHERE member=? AND (paid_at IS NULL OR expires>?)',
+        (member['id'], date.today().isoformat()),
+    ).fetchone()[0]
+    if current_months and package['months'] < current_months:
+        flash(
+            'Không thể đăng ký gói thấp hơn gói hiện tại.',
+            'package_popup'
+        )
+        return redirect('/account/packages')
+
+    if pending:
+        flash('Bạn đã có hóa đơn chờ thanh toán. Vui lòng liên hệ thu ngân.')
+        return redirect('/account/packages')
+
+    old = upgrade_source(c, member['id'])
+    credit = 0
+    upgrade_from = None
+
+    if old is not None:
+        old_value = old['amount'] + old['credit_amount']
+        if (
+                package['months'] > old['months']
+                and package['price'] > old_value
+        ):
+            credit = old_value
+            upgrade_from = old['id']
+
+    c.execute(
+        'INSERT INTO invoices'
+        '(member,months,amount,created,upgrade_from,credit_amount) '
+        'VALUES(?,?,?,?,?,?)',
+        (
+            member['id'],
+            package['months'],
+            package['price'] - credit,
+            date.today().isoformat(),
+            upgrade_from,
+            credit
+        )
+    )
+    notify_reception(
+        c,
+        f"Hội viên {member['name']} đăng ký gói "
+        f"{package['months']} tháng, đang chờ xác nhận thanh toán.",
+        '/payments'
+    )
+    c.commit()
+    flash(
+        'Đã đăng ký gói tập. Vui lòng thanh toán tại quầy. '
+        + confirmation(member['email'], member['name'])
+    )
+    return redirect('/account/packages')
+
+
 def member_area(page):
     # Admin bypass in require() is appropriate for staff routes, not a member identity.
     if session['role'] != 'member': abort(403)
@@ -707,96 +848,18 @@ def member_area(page):
             (session['uid'],)).fetchone()
         if member is None: abort(403)
         if request.method == 'POST':
-            if request.form.get('action') == 'trainer_request':
-                flash(request_trainer(c, member['id'], request.form.get('trainer', '')))
-                return redirect('/account/info')
-            if request.form.get('action') == 'cancel_trainer_request':
-                target = c.execute("SELECT trainer FROM trainer_requests WHERE id=? AND member=? AND status='pending'",
-                                   (request.form.get('request_id', ''), member['id'])).fetchone()
-                changed = c.execute(
-                    "UPDATE trainer_requests SET status='cancelled',responded=? WHERE id=? AND member=? AND status='pending'",
-                    (datetime.now().isoformat(), request.form.get('request_id', ''), member['id'])).rowcount
-                if changed and target is not None:
-                    notify_staff(
-                        c,
-                        target['trainer'],
-                        f"Hội viên {member['name']} đã hủy yêu cầu đăng ký HLV.",
-                        '/trainer-requests'
-                    )
-                flash('Đã hủy yêu cầu HLV.' if changed else 'Yêu cầu không còn ở trạng thái chờ.')
-                return redirect('/account/info')
-            if request.form.get('action') == 'email':
-                email = request.form.get('email', '').strip().lower()
-                if not valid_email(email):
-                    flash('Email là bắt buộc và phải hợp lệ. Không thể bỏ trống email.')
-                else:
-                    c.execute('UPDATE members SET email=? WHERE id=?', (email, member['id']))
-                    notify_member(c, member['id'],
-                                  'Thay đổi email thành công.' if email else 'Đã xóa email khỏi tài khoản.',
-                                  '/account/info')
-                    flash('Đã cập nhật email.' if email else 'Đã bỏ email khỏi hồ sơ.')
-                return redirect('/account/info')
-            if not valid_email(member['email']):
-                flash('Vui lòng bổ sung email hợp lệ trong Thông tin trước khi đăng ký gói tập.')
-                return redirect('/account/info')
-            package = c.execute('SELECT * FROM packages WHERE id=?', (request.form.get('package', ''),)).fetchone()
-            pending = c.execute('SELECT 1 FROM invoices WHERE member=? AND paid_at IS NULL', (member['id'],)).fetchone()
-            current_months = \
-                c.execute('SELECT max(months) FROM invoices WHERE member=? AND (paid_at IS NULL OR expires>?)',
-                          (member['id'], date.today().isoformat())).fetchone()[0]
-            if package is None:
-                flash('Gói tập không hợp lệ.')
-                return redirect('/account/packages')
+            form = request.form
+            action = form.get('action')
+            if action == 'trainer_request':
+                flash(request_trainer(c, member['id'], form.get('trainer', '')))
+            elif action == 'cancel_trainer_request':
+                cancel_pending_trainer_request(c, member, form.get('request_id', ''))
+            elif action == 'email':
+                update_member_email(c, member['id'], form.get('email', ''))
+            else:
+                return register_member_package(c, member, form.get('package', ''))
+            return redirect('/account/info')
 
-            if current_months and package['months'] < current_months:
-                flash(
-                    'Không thể đăng ký gói thấp hơn gói hiện tại.',
-                    'package_popup'
-                )
-                return redirect('/account/packages')
-
-            if pending:
-                flash('Bạn đã có hóa đơn chờ thanh toán. Vui lòng liên hệ thu ngân.')
-                return redirect('/account/packages')
-
-            old = upgrade_source(c, member['id'])
-            credit = 0
-            upgrade_from = None
-
-            if old is not None:
-                old_value = old['amount'] + old['credit_amount']
-                if (
-                        package['months'] > old['months']
-                        and package['price'] > old_value
-                ):
-                    credit = old_value
-                    upgrade_from = old['id']
-
-            c.execute(
-                'INSERT INTO invoices'
-                '(member,months,amount,created,upgrade_from,credit_amount) '
-                'VALUES(?,?,?,?,?,?)',
-                (
-                    member['id'],
-                    package['months'],
-                    package['price'] - credit,
-                    date.today().isoformat(),
-                    upgrade_from,
-                    credit
-                )
-            )
-            notify_reception(
-                c,
-                f"Hội viên {member['name']} đăng ký gói "
-                f"{package['months']} tháng, đang chờ xác nhận thanh toán.",
-                '/payments'
-            )
-            c.commit()
-            flash(
-                'Đã đăng ký gói tập. Vui lòng thanh toán tại quầy. '
-                + confirmation(member['email'], member['name'])
-            )
-            return redirect('/account/packages')
         invoices = c.execute('SELECT * FROM invoices WHERE member=? ORDER BY id DESC', (member['id'],)).fetchall()
         plans = c.execute(
             'SELECT p.*,e.name exercise_name FROM plans p JOIN exercises e ON e.id=p.exercise WHERE p.member=? AND p.active=1',
@@ -884,7 +947,7 @@ def change_password():
             password = f.get('password', '')
             if not check_password_hash(user['password'], f.get('current_password', '')):
                 flash('Mật khẩu hiện tại không đúng.')
-            elif not 8 <= len(password) <= 128 or password != f.get('confirm_password'):
+            elif not valid_password_confirmation(password, f.get('confirm_password')):
                 flash('Mật khẩu mới phải có 8–128 ký tự và khớp với phần nhập lại.')
             elif check_password_hash(user['password'], password):
                 flash('Mật khẩu mới phải khác mật khẩu hiện tại.')
@@ -917,7 +980,7 @@ def reset_member_password(mid):
             operator = c.execute('SELECT password FROM users WHERE id=?', (session['uid'],)).fetchone()
             if not check_password_hash(operator['password'], f.get('current_password', '')):
                 flash('Mật khẩu của bạn không đúng.')
-            elif not 8 <= len(password) <= 128 or password != f.get('confirm_password'):
+            elif not valid_password_confirmation(password, f.get('confirm_password')):
                 flash('Mật khẩu mới phải có 8–128 ký tự và khớp với phần nhập lại.')
             else:
                 c.execute('UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',
@@ -973,7 +1036,7 @@ def manage_receptionists():
             flash('Tên đăng nhập cần 3–40 ký tự, bắt đầu bằng chữ không dấu; chỉ chứa chữ, số, dấu chấm, gạch dưới hoặc gạch ngang.')
         elif not name or len(name)>120:
             flash('Họ tên lễ tân cần từ 1 đến 120 ký tự.')
-        elif not 8<=len(password)<=128 or password!=f.get('confirm_password'):
+        elif not valid_password_confirmation(password, f.get('confirm_password')):
             flash('Mật khẩu cần 8–128 ký tự và khớp với phần nhập lại.')
         else:
             try:
@@ -1000,7 +1063,7 @@ def reset_reception_password(uid):
             operator=c.execute('SELECT password FROM users WHERE id=?',(session['uid'],)).fetchone()
             if not check_password_hash(operator['password'],request.form.get('current_password','')):
                 flash('Mật khẩu admin hiện tại không đúng.')
-            elif not 8<=len(password)<=128 or password!=request.form.get('confirm_password'):
+            elif not valid_password_confirmation(password, request.form.get('confirm_password')):
                 flash('Mật khẩu mới cần 8–128 ký tự và khớp với phần nhập lại.')
             else:
                 c.execute('UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',(generate_password_hash(password),uid))
@@ -1041,7 +1104,7 @@ def manage_trainers():
                 'Tên đăng nhập cần 3–40 ký tự, bắt đầu bằng chữ và chỉ chứa chữ không dấu, số, dấu chấm, gạch dưới hoặc gạch ngang.')
         elif not name or len(name) > 120:
             flash('Họ tên HLV cần từ 1 đến 120 ký tự.')
-        elif not 8 <= len(password) <= 128 or password != f.get('confirm_password'):
+        elif not valid_password_confirmation(password, f.get('confirm_password')):
             flash('Mật khẩu cần 8–128 ký tự và khớp với phần nhập lại.')
         else:
             try:
