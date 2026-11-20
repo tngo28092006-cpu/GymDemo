@@ -32,4 +32,44 @@
 </nav>
 <div class="grid operations-charts"><section class="panel"><div class="section-heading"><div><h2>Đăng ký theo tháng</h2><p>Theo dõi số hội viên đăng ký mới</p></div><span class="period-tag">Năm {{ year }}</span></div><div class="chart"><canvas id="members" aria-label="Biểu đồ số hội viên đăng ký theo tháng" role="img"></canvas></div></section><section class="panel"><div class="section-heading"><div><h2>Doanh thu theo tháng</h2><p>Tổng tiền thực thu trong năm</p></div><span class="period-tag">Năm {{ year }}</span></div><div class="chart"><canvas id="revenue" aria-label="Biểu đồ doanh thu theo tháng" role="img"></canvas></div></section></div>
 <details class="panel"><summary>Xem bảng số liệu chi tiết theo tháng</summary><table><tr><th>Tháng</th><th>Hội viên đăng ký</th><th>Doanh thu</th></tr>{% for i in range(12) %}<tr><td>Tháng {{ i+1 }}</td><td>{{ counts[i] }}</td><td class="money">{{ '{:,}'.format(totals[i]) }} đ</td></tr>{% endfor %}</table></details>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script><script>if(window.Chart){Chart.defaults.font.family='-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif';Chart.defaults.font.size=12;Chart.defaults.color='#647084';const labels=Array.from({length:12},(_,i)=>'T'+(i+1));for(const [id,data,title] of [['members',{{ counts|tojson }},'Hội viên'],['revenue',{{ totals|tojson }},'VND']])new Chart(document.getElementById(id),{type:'bar',data:{labels,datasets:[{label:title,data,backgroundColor:id==='members'?'#c64b1b':'#353e4b',hoverBackgroundColor:'#9a3813',borderRadius:5,maxBarThickness:24}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{backgroundColor:'#181b20',padding:12,cornerRadius:8}},scales:{x:{grid:{display:false},border:{display:false}},y:{beginAtZero:true,border:{display:false},grid:{color:'#edf0f3'},ticks:{precision:0,maxTicksLimit:5}}}}});}else{document.querySelectorAll('.chart').forEach(el=>{el.innerHTML='<div class="chart-unavailable">Biểu đồ chưa tải được.<br>Mở bảng số liệu bên dưới để xem chi tiết.</div>';});}</script>{% endblock %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+<script>
+    if (window.Chart) {
+        const labels = Array.from({ length: 12 }, (_, i) => 'T' + (i + 1));
+        const charts = [
+            ['members', {{ counts|tojson }}, 'Hội viên'],
+            ['revenue', {{ totals|tojson }}, 'VND']
+        ].map(([id, data, label]) => new Chart(document.getElementById(id), {
+            type: 'bar',
+            data: { labels, datasets: [{ label, data, borderRadius: 5, maxBarThickness: 24 }] },
+            options: {
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { padding: 12, cornerRadius: 8 } },
+                scales: {
+                    x: { grid: { display: false }, border: { display: false }, ticks: {} },
+                    y: { beginAtZero: true, border: { display: false }, grid: {}, ticks: { precision: 0, maxTicksLimit: 5 } }
+                }
+            }
+        }));
+
+        const applyChartTheme = () => {
+            const styles = getComputedStyle(document.documentElement);
+            const color = name => styles.getPropertyValue('--chart-' + name).trim();
+            charts.forEach(chart => {
+                chart.data.datasets[0].backgroundColor = color(chart.canvas.id);
+                chart.options.scales.x.ticks.color = color('text');
+                chart.options.scales.y.ticks.color = color('text');
+                chart.options.scales.y.grid.color = color('grid');
+                chart.update('none');
+            });
+        };
+
+        applyChartTheme();
+        document.addEventListener('gymdemo:theme-change', applyChartTheme);
+    } else {
+        document.querySelectorAll('.chart').forEach(element => {
+            element.innerHTML = '<div class="chart-unavailable">Biểu đồ chưa tải được.<br>Mở bảng số liệu bên dưới để xem chi tiết.</div>';
+        });
+    }
+</script>
+{% endblock %}
