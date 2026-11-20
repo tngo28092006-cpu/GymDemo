@@ -935,6 +935,13 @@ def cancel_trainer():
     return render_template('cancel_trainer.html', member=member, accepted=accepted)
 
 
+def update_user_password(c, user_id, password):
+    c.execute(
+        'UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',
+        (generate_password_hash(password), user_id),
+    )
+
+
 @app.route('/account/password', methods=['GET', 'POST'])
 @require('member','admin')
 def change_password():
@@ -952,8 +959,7 @@ def change_password():
             elif check_password_hash(user['password'], password):
                 flash('Mật khẩu mới phải khác mật khẩu hiện tại.')
             else:
-                c.execute('UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',
-                          (generate_password_hash(password), user['id']))
+                update_user_password(c, user['id'], password)
                 if user['role']=='member':
                     target = c.execute('SELECT id FROM members WHERE user_id=?', (user['id'],)).fetchone()
                     notify_member(c, target['id'], 'Thay đổi mật khẩu thành công.', '/account/info')
@@ -983,18 +989,35 @@ def reset_member_password(mid):
             elif not valid_password_confirmation(password, f.get('confirm_password')):
                 flash('Mật khẩu mới phải có 8–128 ký tự và khớp với phần nhập lại.')
             else:
-                c.execute('UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',
-                          (generate_password_hash(password), member['user_id']))
+                update_user_password(c, member['user_id'], password)
                 notify_member(c, mid, 'Mật khẩu của bạn đã được nhân viên đặt lại thành công.', '/account/info')
                 flash(f"Đã đặt lại mật khẩu cho hội viên {member_code(mid)}. Các phiên đăng nhập cũ đã bị đăng xuất.")
                 return redirect('/members')
     return render_template('password.html', member=member)
 
 
+# Shared by the trainer roster, schedule views, and schedule deletion.
+CONFIRMED_TRAINER_MEMBER = """
+    m.deleted_at IS NULL AND m.trainer=?
+    AND EXISTS (
+        SELECT 1 FROM trainer_requests r
+        WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted'
+    )
+"""
+
+
 def trainer_schedule_rows(c, trainer_id):
     return c.execute(
-        "SELECT p.*,m.name,e.name exercise_name FROM plans p JOIN members m ON m.id=p.member JOIN exercises e ON e.id=p.exercise WHERE p.active=1 AND m.deleted_at IS NULL AND m.trainer=? AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=? AND r.status='accepted') ORDER BY m.name,m.id,p.id",
-        (trainer_id, trainer_id)).fetchall()
+        f"""
+        SELECT p.*,m.name,e.name AS exercise_name
+        FROM plans p
+        JOIN members m ON m.id=p.member
+        JOIN exercises e ON e.id=p.exercise
+        WHERE p.active=1 AND {CONFIRMED_TRAINER_MEMBER}
+        ORDER BY m.name,m.id,p.id
+        """,
+        (trainer_id,),
+    ).fetchall()
 
 
 @app.get('/')
@@ -1024,31 +1047,50 @@ def dashboard():
                            totals=[totals.get(f'{i:02}', 0) for i in range(1, 13)])
 
 
-@app.route('/receptionists',methods=['GET','POST'])
+def create_staff_account(form, role, title):
+    username = form.get('username', '').strip().lower()
+    full_name = form.get('full_name', '').strip()
+    password = form.get('password', '')
+
+    if not re.fullmatch(r'[a-z][a-z0-9_.-]{2,39}', username):
+        flash(
+            'Tên đăng nhập cần 3–40 ký tự, bắt đầu bằng chữ không dấu '
+            'và chỉ chứa chữ, số, dấu chấm, gạch dưới hoặc gạch ngang.'
+        )
+    elif not 1 <= len(full_name) <= 120:
+        flash(f'Họ tên {title} cần từ 1 đến 120 ký tự.')
+    elif not valid_password_confirmation(password, form.get('confirm_password')):
+        flash('Mật khẩu cần 8–128 ký tự và khớp với phần nhập lại.')
+    else:
+        try:
+            with db() as c:
+                c.execute(
+                    'INSERT INTO users(username,password,role,full_name) VALUES(?,?,?,?)',
+                    (username, generate_password_hash(password), role, full_name),
+                )
+            return username
+        except DB_INTEGRITY_ERRORS:
+            flash('Tên đăng nhập đã tồn tại. Hãy chọn tên khác.')
+    return None
+
+
+def active_staff_accounts(role):
+    with db() as c:
+        return c.execute(
+            'SELECT id,username,full_name FROM users WHERE role=? AND active=1 ORDER BY id DESC',
+            (role,),
+        ).fetchall()
+
+
+@app.route('/receptionists', methods=['GET', 'POST'])
 @require('admin')
 def manage_receptionists():
-    if request.method=='POST':
-        f=request.form
-        username=f.get('username','').strip().lower()
-        name=f.get('full_name','').strip()
-        password=f.get('password','')
-        if not re.fullmatch(r'[a-z][a-z0-9_.-]{2,39}',username):
-            flash('Tên đăng nhập cần 3–40 ký tự, bắt đầu bằng chữ không dấu; chỉ chứa chữ, số, dấu chấm, gạch dưới hoặc gạch ngang.')
-        elif not name or len(name)>120:
-            flash('Họ tên lễ tân cần từ 1 đến 120 ký tự.')
-        elif not valid_password_confirmation(password, f.get('confirm_password')):
-            flash('Mật khẩu cần 8–128 ký tự và khớp với phần nhập lại.')
-        else:
-            try:
-                with db() as c:
-                    c.execute("INSERT INTO users(username,password,role,full_name) VALUES(?,?,'reception',?)",(username,generate_password_hash(password),name))
-                flash('Đã tạo tài khoản lễ tân '+username+'.')
-                return redirect('/receptionists')
-            except DB_INTEGRITY_ERRORS:
-                flash('Tên đăng nhập đã tồn tại. Hãy chọn tên khác.')
-    with db() as c:
-        rows=c.execute("SELECT id,username,full_name FROM users WHERE role='reception' AND active=1 ORDER BY id DESC").fetchall()
-    return render_template('receptionists.html',rows=rows)
+    if request.method == 'POST':
+        username = create_staff_account(request.form, 'reception', 'lễ tân')
+        if username:
+            flash(f'Đã tạo tài khoản lễ tân {username}.')
+            return redirect('/receptionists')
+    return render_template('receptionists.html', rows=active_staff_accounts('reception'))
 
 
 @app.route('/receptionists/<int:uid>/password',methods=['GET','POST'])
@@ -1066,7 +1108,7 @@ def reset_reception_password(uid):
             elif not valid_password_confirmation(password, request.form.get('confirm_password')):
                 flash('Mật khẩu mới cần 8–128 ký tự và khớp với phần nhập lại.')
             else:
-                c.execute('UPDATE users SET password=?,auth_version=auth_version+1 WHERE id=?',(generate_password_hash(password),uid))
+                update_user_password(c, uid, password)
                 notify_staff(c,uid,'Admin đã đặt lại mật khẩu lễ tân của bạn thành công.','/')
                 flash('Đã đặt lại mật khẩu lễ tân. Các phiên đăng nhập cũ đã bị đăng xuất.')
                 return redirect('/receptionists')
@@ -1095,30 +1137,11 @@ def delete_receptionist(uid):
 @require('reception')
 def manage_trainers():
     if request.method == 'POST':
-        f = request.form
-        username = f.get('username', '').strip().lower()
-        name = f.get('full_name', '').strip()
-        password = f.get('password', '')
-        if not re.fullmatch(r'[a-z][a-z0-9_.-]{2,39}', username):
-            flash(
-                'Tên đăng nhập cần 3–40 ký tự, bắt đầu bằng chữ và chỉ chứa chữ không dấu, số, dấu chấm, gạch dưới hoặc gạch ngang.')
-        elif not name or len(name) > 120:
-            flash('Họ tên HLV cần từ 1 đến 120 ký tự.')
-        elif not valid_password_confirmation(password, f.get('confirm_password')):
-            flash('Mật khẩu cần 8–128 ký tự và khớp với phần nhập lại.')
-        else:
-            try:
-                with db() as c:
-                    c.execute('INSERT INTO users(username,password,role,full_name) VALUES(?,?,?,?)',
-                              (username, generate_password_hash(password), 'trainer', name))
-                flash(f'Đã tạo tài khoản HLV {username}. HLV có thể đăng nhập và nhận yêu cầu của hội viên.')
-                return redirect('/trainers')
-            except DB_INTEGRITY_ERRORS:
-                flash('Tên đăng nhập đã tồn tại. Hãy chọn tên khác.')
-    with db() as c:
-        trainers = c.execute(
-            "SELECT id,username,full_name FROM users WHERE role='trainer' AND active=1 ORDER BY id DESC").fetchall()
-    return render_template('trainers.html', trainers=trainers)
+        username = create_staff_account(request.form, 'trainer', 'HLV')
+        if username:
+            flash(f'Đã tạo tài khoản HLV {username}. HLV có thể đăng nhập và nhận yêu cầu của hội viên.')
+            return redirect('/trainers')
+    return render_template('trainers.html', trainers=active_staff_accounts('trainer'))
 
 
 @app.route('/trainers/<int:tid>/delete', methods=['GET', 'POST'])
@@ -1164,12 +1187,12 @@ def members():
             c.execute('BEGIN IMMEDIATE')
             flash(request_trainer(c, request.form.get('member', ''), request.form.get('trainer', '')))
             return redirect('/members')
-        query = "SELECT m.*,(CASE WHEN length(u.full_name)>0 THEN u.full_name ELSE u.username END) trainer_name,r.id pending_request_id,(CASE WHEN length(pt.full_name)>0 THEN pt.full_name ELSE pt.username END) pending_trainer FROM members m LEFT JOIN users u ON u.id=m.trainer LEFT JOIN trainer_requests r ON r.member=m.id AND r.status='pending' LEFT JOIN users pt ON pt.id=r.trainer WHERE m.deleted_at IS NULL"
-        params = ()
+        query = "SELECT m.*,(CASE WHEN length(u.full_name)>0 THEN u.full_name ELSE u.username END) trainer_name,r.id pending_request_id,(CASE WHEN length(pt.full_name)>0 THEN pt.full_name ELSE pt.username END) pending_trainer FROM members m LEFT JOIN users u ON u.id=m.trainer LEFT JOIN trainer_requests r ON r.member=m.id AND r.status='pending' LEFT JOIN users pt ON pt.id=r.trainer "
         if session['role'] == 'trainer':
-            query += " AND m.trainer=? AND EXISTS(SELECT 1 FROM trainer_requests confirmed WHERE confirmed.member=m.id AND confirmed.trainer=? AND confirmed.status='accepted')"
-            params = (session['uid'], session['uid'])
-        rows = c.execute(query + ' ORDER BY m.id DESC', params).fetchall()
+            where, params = CONFIRMED_TRAINER_MEMBER, (session['uid'],)
+        else:
+            where, params = 'm.deleted_at IS NULL', ()
+        rows = c.execute(f'{query} WHERE {where} ORDER BY m.id DESC', params).fetchall()
         trainers = c.execute("SELECT * FROM users WHERE role='trainer' AND active=1").fetchall()
     return render_template('members.html', rows=rows, trainers=trainers)
 
@@ -1281,12 +1304,17 @@ def plans():
     with db() as c:
         # Only accepted trainer requests authorize scheduling.
         if request.method == 'POST': c.execute('BEGIN IMMEDIATE')
-        query = "SELECT m.*,(CASE WHEN length(u.full_name)>0 THEN u.full_name ELSE u.username END) trainer_name FROM members m LEFT JOIN users u ON u.id=m.trainer WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted')"
-        params = ()
-        if session['role'] == 'trainer':
-            query += ' AND m.trainer=?'
-            params = (session['uid'],)
-        available = c.execute(query + ' ORDER BY m.name,m.id', params).fetchall()
+        available = c.execute(
+            f"""
+            SELECT m.*,
+                   CASE WHEN length(u.full_name)>0 THEN u.full_name ELSE u.username END AS trainer_name
+            FROM members m
+            LEFT JOIN users u ON u.id=m.trainer
+            WHERE {CONFIRMED_TRAINER_MEMBER}
+            ORDER BY m.name,m.id
+            """,
+            (session['uid'],),
+        ).fetchall()
         limit = c.execute('SELECT max_days FROM settings').fetchone()[0]
         if request.method == 'POST':
             try:
@@ -1295,10 +1323,8 @@ def plans():
                 sets = int(request.form['sets'])
                 reps = int(request.form['reps'])
                 eid = int(request.form['exercise'])
-                member = next((m for m in available if m['id'] == mid), None)
-                if not member: raise ValueError()
-                if session['role'] != 'admin' and member['trainer'] != session['uid']:
-                    abort(403)
+                if not any(member['id'] == mid for member in available):
+                    raise ValueError()
                 existing = set()
                 for row in c.execute('SELECT days FROM plans WHERE active=1 AND member=?', (mid,)):
                     existing.update(row['days'].split(','))
@@ -1316,9 +1342,8 @@ def plans():
                 flash(f'Thông tin không hợp lệ. Chọn hội viên, bài tập và từ 1 đến {limit} ngày tập/tuần.')
         rows = trainer_schedule_rows(c, session['uid'])
         exercises = c.execute('SELECT * FROM exercises WHERE active=1').fetchall()
-        can_schedule = any(session['role'] == 'admin' or m['trainer'] == session['uid'] for m in available)
     return render_template('plans.html', rows=rows, members=available, exercises=exercises, limit=limit,
-                           can_schedule=can_schedule, selected_member=request.args.get('member', type=int))
+                           can_schedule=bool(available), selected_member=request.args.get('member', type=int))
 
 
 @app.post('/plans/<int:pid>/delete')
@@ -1327,8 +1352,10 @@ def delete_plan(pid):
     if session['role'] != 'trainer': abort(403)
     with db() as c:
         c.execute(
-            "DELETE FROM plans WHERE id=? AND active=1 AND member IN (SELECT m.id FROM members m WHERE m.deleted_at IS NULL AND EXISTS(SELECT 1 FROM trainer_requests r WHERE r.member=m.id AND r.trainer=m.trainer AND r.status='accepted') AND (m.trainer=? OR ?='admin'))",
-            (pid, session['uid'], session['role']))
+            'DELETE FROM plans WHERE id=? AND active=1 AND member IN ('
+            f'SELECT m.id FROM members m WHERE {CONFIRMED_TRAINER_MEMBER})',
+            (pid, session['uid']),
+        )
     return redirect('/plans')
 
 
